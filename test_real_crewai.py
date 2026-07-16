@@ -1,4 +1,3 @@
-import os
 import litellm
 from crewai import Agent, Task, Crew, LLM
 from crewai.tools import tool
@@ -6,11 +5,12 @@ from storage import LocalGraphStore
 from compiler import IRCompiler, PlanCompiler, ReplaySession
 from runtime import ReplayVM
 from sdk import LiveRecorder
+from env_utils import get_hf_token
 
 # 1. SETUP THE REAL LLM
-hf_token = os.environ.get("HF_TOKEN")
+hf_token = get_hf_token()
 if not hf_token:
-    raise ValueError("🚨 Please set the HF_TOKEN environment variable before running.")
+    raise ValueError("🚨 Please set the HF_TOKEN environment variable or add it to .env before running.")
 
 hf_llm = LLM(
     model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct",

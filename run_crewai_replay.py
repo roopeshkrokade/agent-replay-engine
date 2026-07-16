@@ -1,10 +1,10 @@
-import os
 import litellm
 import argparse
 from crewai import LLM
 from storage import LocalGraphStore
 from compiler import PlanCompiler, ReplaySession
 from runtime import ReplayVM
+from env_utils import get_hf_token
 # Import your actual app workflow function
 from test_real_crewai import run_multi_agent_workflow
 
@@ -36,7 +36,7 @@ def run_replay(graph_id: str):
     litellm.completion = hydrated_interceptor
 
     # 4. Run the actual App (CrewAI will render the UI normally)
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_token = get_hf_token()
     hf_llm = LLM(model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct", api_key=hf_token)
     run_multi_agent_workflow(hf_llm)
 
