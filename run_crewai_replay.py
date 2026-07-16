@@ -6,7 +6,7 @@ from compiler import PlanCompiler, ReplaySession
 from runtime import ReplayVM
 from env_utils import get_hf_token
 # Import your actual app workflow function
-from test_real_crewai import run_multi_agent_workflow
+from tests.test_real_crewai import run_multi_agent_workflow
 
 def run_replay(graph_id: str):
     print(f"🚀 Booting Replay VM for {graph_id}...")

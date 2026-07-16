@@ -1,6 +1,22 @@
-from adapters.openinference.adapter import OpenInferenceAdapter
-from compiler import IRCompiler
-from storage import LocalGraphStore
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+    
+from adapters.openinference.adapter import OpenInferenceAdapter  # noqa: E402
+from compiler import IRCompiler  # noqa: E402
+from storage import LocalGraphStore  # noqa: E402
+
+
+def test_store_uses_repo_relative_default_path(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    store = LocalGraphStore()
+    graph = store.load("g_compiled_001")
+
+    assert graph.id == "g_compiled_001"
+
 
 def test_persistence():
     print("1. Compiling trace into IR...")

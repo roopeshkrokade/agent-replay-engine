@@ -1,11 +1,18 @@
 import litellm
 from crewai import Agent, Task, Crew, LLM
 from crewai.tools import tool
-from storage import LocalGraphStore
-from compiler import IRCompiler, PlanCompiler, ReplaySession
-from runtime import ReplayVM
-from sdk import LiveRecorder
-from env_utils import get_hf_token
+
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+    
+from storage import LocalGraphStore  # noqa: E402
+from compiler import IRCompiler, PlanCompiler, ReplaySession  # noqa: E402
+from runtime import ReplayVM  # noqa: E402
+from sdk import LiveRecorder  # noqa: E402
+from env_utils import get_hf_token  # noqa: E402
 
 # 1. SETUP THE REAL LLM
 hf_token = get_hf_token()

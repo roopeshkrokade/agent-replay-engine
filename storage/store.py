@@ -11,8 +11,15 @@ class LocalGraphStore:
     Saves and loads ExecutionGraphs to local disk.
     Acts as the persistent repository for compiled IR.
     """
-    def __init__(self, base_dir: str = ".replay_engine/graphs"):
-        self.base_dir = Path(base_dir)
+    def __init__(self, base_dir: str | Path | None = None):
+        if base_dir is None:
+            base_dir = Path(__file__).resolve().parents[1] / ".replay_engine" / "graphs"
+        else:
+            base_dir = Path(base_dir)
+            if not base_dir.is_absolute():
+                base_dir = Path(__file__).resolve().parents[1] / base_dir
+
+        self.base_dir = base_dir.resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def save(self, graph: ExecutionGraph) -> Path:

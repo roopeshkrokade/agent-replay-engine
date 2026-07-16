@@ -1,8 +1,14 @@
 import json
 import dataclasses
 from enum import Enum
-from adapters.openinference.adapter import OpenInferenceAdapter
-from compiler.ir_compiler import IRCompiler
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+    
+from adapters.openinference.adapter import OpenInferenceAdapter  # noqa: E402
+from compiler.ir_compiler import IRCompiler  # noqa: E402
 
 # JSON Helper to handle Enums cleanly
 class IREncoder(json.JSONEncoder):

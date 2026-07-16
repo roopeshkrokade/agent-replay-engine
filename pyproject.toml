@@ -9,3 +9,8 @@ dependencies = [
     "litellm>=1.92.0",
     "sqlalchemy>=2.0.51",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

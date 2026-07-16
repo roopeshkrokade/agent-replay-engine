@@ -1,7 +1,14 @@
 import json
 import dataclasses
+import sys
+from pathlib import Path
 from enum import Enum
-from ir import (
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ir import (  # noqa: E402
     IR_SCHEMA_VERSION, GraphId, NodeId, EdgeId,
     NodeKind, EdgeKind, GraphMetadata, NodeMetadata, EdgeMetadata,
     ExecutionNode, ExecutionEdge, ExecutionGraph
