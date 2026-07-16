@@ -1,0 +1,33 @@
+[
+  {
+    "context": {
+      "trace_id": "trace_001",
+      "span_id": "span_1"
+    },
+    "name": "ChatCompletion",
+    "start_time": "2026-07-16T12:00:00.000Z",
+    "end_time": "2026-07-16T12:00:01.000Z",
+    "attributes": {
+      "openinference.span.kind": "LLM",
+      "llm.model_name": "gpt-4o",
+      "input.value": "{\"role\": \"user\", \"content\": \"What is the weather in Tokyo?\"}",
+      "output.value": "{\"type\": \"tool_call\", \"name\": \"get_weather\"}"
+    }
+  },
+  {
+    "context": {
+      "trace_id": "trace_001",
+      "span_id": "span_2"
+    },
+    "parent_id": "span_1",
+    "name": "get_weather",
+    "start_time": "2026-07-16T12:00:01.050Z",
+    "end_time": "2026-07-16T12:00:01.500Z",
+    "attributes": {
+      "openinference.span.kind": "TOOL",
+      "tool.name": "get_weather",
+      "input.value": "{\"loc\": \"Tokyo\"}",
+      "output.value": "\"72F\""
+    }
+  }
+]
