@@ -1,5 +1,4 @@
 import litellm
-import time
 from crewai import Agent, Task, Crew, LLM
 from crewai.tools import tool
 
@@ -72,7 +71,6 @@ def test_crewai_autolog():
     
     def extract_messages(*args, **kwargs):
         messages = kwargs.get("messages", [])
-        # Normalizing to avoid divergence
         content = messages[-1]["content"] if messages else ""
         return {"prompt_snippet": content[-500:]}
 
@@ -80,22 +78,24 @@ def test_crewai_autolog():
     
     run_multi_agent_workflow(hf_llm)
     
-    # Compile and Save with unique ID
+    # Compile and Save with Agent Identity Tracking
     events = recorder.finish()
-    unique_id = f"crewai_run_{int(time.time())}"
-    graph = IRCompiler().compile(events, graph_id=unique_id)
+    graph = IRCompiler().compile(events)
     store = SQLiteGraphStore()
-    store.save(graph)
-    print(f"\n💾 [System] Multi-Agent execution saved as: {graph.id}")
+    
+    # 🌟 FIX: We now provide the agent_id and agent_name
+    record_id = store.save(graph, agent_id="test_crewai_agent", agent_name="Test CrewAI Agent")
+    print(f"\n💾 [System] Multi-Agent execution saved as: {record_id}")
 
     # ---------------------------------------------------------
     # PHASE 2: DETERMINISTIC REPLAY
     # ---------------------------------------------------------
     print("\n==================================================")
-    print(f"🟢 PHASE 2: REPLAYING {graph.id} (ZERO NETWORK)")
+    print(f"🟢 PHASE 2: REPLAYING {record_id} (ZERO NETWORK)")
     print("==================================================")
     
-    loaded_graph = store.load(graph.id)
+    # 🌟 FIX: Load using the dynamic versioned record_id
+    loaded_graph = store.load(record_id)
     plan = PlanCompiler().compile(loaded_graph, ReplaySession(mode="CACHE"))
     vm = ReplayVM(plan)
     
@@ -104,7 +104,6 @@ def test_crewai_autolog():
         result = vm.advance(vm_input)
         
         if not result.success:
-            # We explicitly print what the VM received to help debug mismatches
             print(f"DEBUG: VM received: {vm_input}")
             raise RuntimeError(f"Replay Divergence: {result.resolution.reason}")
             

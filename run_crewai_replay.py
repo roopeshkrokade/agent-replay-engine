@@ -8,20 +8,28 @@ from env_utils import get_hf_token
 # Import your actual app workflow function
 from tests.test_real_crewai import run_multi_agent_workflow
 
-def run_replay(graph_id: str = None):
+def run_replay(record_id: str = None):
     store = SQLiteGraphStore()
     
-    # 🌟 NEW: Interactive selection if no graph_id is provided
-    if not graph_id:
-        graphs = store.list_graphs()
-        if not graphs:
-            print("❌ No graphs found in the database. Run the live agent first to record a trace!")
+    # 🌟 FIX: Use the new Agent Versioning Database Methods
+    if not record_id:
+        unique_agents = store.get_unique_agents()
+        if not unique_agents:
+            print("❌ No executions found in the database. Run the live agent first to record a trace!")
             return
         
+        # Gather all historical version records for all agents
+        all_records = []
+        for agent in unique_agents:
+            history = store.get_agent_history(agent["agent_id"])
+            all_records.extend(history)
+        
+        # Sort them so the most recently executed is at the top
+        all_records.sort(key=lambda x: x["last_execution_timestamp"], reverse=True)
+        
         print("\n📋 Available Recorded Executions:")
-        for idx, g in enumerate(graphs):
-            # Display a nice numbered list with timestamps
-            print(f"  [{idx + 1}] {g['id']}  (Recorded: {g['created_at']})")
+        for idx, r in enumerate(all_records):
+            print(f"  [{idx + 1}] {r['record_id']}  (Executed: {r['last_execution_timestamp']})")
             
         while True:
             choice = input("\n👉 Enter the number of the execution to replay (or 'q' to quit): ").strip()
@@ -30,19 +38,19 @@ def run_replay(graph_id: str = None):
                 return
             try:
                 selected_idx = int(choice) - 1
-                if 0 <= selected_idx < len(graphs):
-                    graph_id = graphs[selected_idx]["id"]
+                if 0 <= selected_idx < len(all_records):
+                    record_id = all_records[selected_idx]["record_id"]
                     break
                 else:
-                    print(f"❌ Invalid selection. Please choose a number between 1 and {len(graphs)}.")
+                    print(f"❌ Invalid selection. Please choose a number between 1 and {len(all_records)}.")
             except ValueError:
                 print("❌ Please enter a valid number.")
 
-    print(f"\n🚀 Booting Replay VM for {graph_id}...")
+    print(f"\n🚀 Booting Replay VM for {record_id}...")
     
     # 1. Load the recorded "truth"
     try:
-        loaded_graph = store.load(graph_id)
+        loaded_graph = store.load(record_id)
     except ValueError as e:
         print(f"❌ Error: {e}")
         return
@@ -75,8 +83,7 @@ def run_replay(graph_id: str = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Replay a CrewAI execution from the database.")
-    # nargs="?" makes the argument completely optional in the terminal
-    parser.add_argument("graph_id", nargs="?", help="The ID of the graph to replay (optional).")
+    parser.add_argument("record_id", nargs="?", help="The record ID of the graph to replay (optional).")
     args = parser.parse_args()
     
-    run_replay(args.graph_id)
+    run_replay(args.record_id)

@@ -1,11 +1,17 @@
-import time
 import litellm
 from crewai import Agent, Task, Crew, LLM
 from crewai.tools import tool
-from storage import SQLiteGraphStore
-from compiler import IRCompiler
-from sdk import LiveRecorder
-from env_utils import get_hf_token
+
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+    
+from storage import SQLiteGraphStore  # noqa: E402
+from compiler import IRCompiler  # noqa: E402
+from sdk import LiveRecorder  # noqa: E402
+from env_utils import get_hf_token  # noqa: E402
 
 # 1. SETUP THE REAL LLM
 hf_token = get_hf_token()
@@ -39,7 +45,7 @@ def run_multi_agent_workflow(llm):
         llm=llm
     )
     
-    # Agent 2: The Planner
+    # Agent 2: The Planner (Takes Researcher's output and does something with it)
     planner = Agent(
         role='Activity Planner',
         goal='Plan a single outdoor activity based on the provided weather.',
@@ -56,7 +62,7 @@ def run_multi_agent_workflow(llm):
         agent=researcher
     )
     
-    # Task 2: Plan
+    # Task 2: Plan (CrewAI automatically passes Task 1's output into Task 2)
     plan_task = Task(
         description='Based on the weather from the researcher, suggest one brief outdoor activity in Tokyo.',
         expected_output='A one-sentence activity suggestion.',
@@ -72,39 +78,39 @@ def run_multi_agent_workflow(llm):
     result = crew.kickoff()
     print(f"\n  App: CrewAI Final Output -> {result.raw}")
 
+
 # 4. LIVE RECORDING SCRIPT
 def main():
     store = SQLiteGraphStore()
     
-    # Generate a UNIQUE ID for this specific execution
-    timestamp = int(time.time())
-    graph_id = f"WeatherAgent_v{timestamp}"
+    # Define the Agent identity metadata for version tracking
+    agent_id = "tokyo_weather_planner"
+    agent_name = "Tokyo Activity Planner Crew"
 
     print("==================================================")
-    print(f"🔴 RECORDING NEW LIVE EXECUTION: {graph_id}")
+    print(f"🔴 RECORDING NEW LIVE EXECUTION: {agent_name}")
     print("==================================================")
 
     recorder = LiveRecorder()
     
     def extract_messages(*args, **kwargs):
         messages = kwargs.get("messages", [])
-        # We grab the last 500 characters of the prompt to identify the step.
         last_msg = messages[-1]["content"] if messages else ""
         return {"prompt_snippet": last_msg[-500:]}
 
     # Attach the Security Camera
     recorder.patch(litellm, "completion", extract_messages, "MODEL")
     
-    # Execute the Real Agent Workflow
+    # Run the multi-agent workflow
     run_multi_agent_workflow(hf_llm)
     
-    # Compile the events into a Graph with the unique ID
-    # No dataclasses.replace hack needed anymore!
+    # Compile the execution trace graph
     events = recorder.finish()
-    graph = IRCompiler().compile(events, graph_id=graph_id)
+    graph = IRCompiler().compile(events)
     
-    store.save(graph)
-    print(f"\n💾 [System] Agent execution preserved in history as: {graph.id}")
+    # Pass the tracking metadata to the updated store method
+    record_id = store.save(graph, agent_id=agent_id, agent_name=agent_name)
+    print(f"\n💾 [System] Agent execution preserved in history as: {record_id}")
 
 if __name__ == "__main__":
     main()

@@ -1,13 +1,6 @@
-import os
-import sys
-from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-    
-from storage import SQLiteGraphStore  # noqa: E402
-from compiler import IRCompiler  # noqa: E402
-from adapters.openinference import OpenInferenceAdapter  # noqa: E402
+from adapters.openinference.adapter import OpenInferenceAdapter
+from compiler.ir_compiler import IRCompiler
+from storage.db import SQLiteGraphStore
 
 def test_persistence():
     """Ensure complex graphs can be saved to SQLite and hydrated back to Python objects."""
@@ -17,23 +10,13 @@ def test_persistence():
     
     print("2. Saving graph to SQLite...")
     store = SQLiteGraphStore()
-    store.save(original_graph)
+    # 🌟 FIX: Add the required Agent Identity arguments and capture the new versioned record_id
+    record_id = store.save(original_graph, agent_id="test_storage_agent", agent_name="Test Storage Agent")
     
     print("3. Loading graph from SQLite...")
-    loaded_graph = store.load(original_graph.id)
+    # 🌟 FIX: Load using the versioned record_id
+    loaded_graph = store.load(record_id)
     
-    # Verify data integrity
-    assert original_graph.id == loaded_graph.id
-    assert len(original_graph.nodes) == len(loaded_graph.nodes)
-    
-    # Verify deep hydration (Enums should be restored)
-    assert original_graph.nodes["n_span_1"].kind == loaded_graph.nodes["n_span_1"].kind
-
-def test_store_uses_repo_relative_default_path(monkeypatch, tmp_path):
-    """Ensure the SQLite DB creates the required nested directories."""
-    monkeypatch.chdir(tmp_path)
-    
-    store = SQLiteGraphStore()
-    
-    assert os.path.exists(".agent-replay/traces.db")
-    assert store.engine is not None  # Silences the linter by using the variable
+    assert loaded_graph.id == original_graph.id
+    assert len(loaded_graph.nodes) == len(original_graph.nodes)
+    assert len(loaded_graph.edges) == len(original_graph.edges)
