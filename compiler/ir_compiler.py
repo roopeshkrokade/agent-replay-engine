@@ -1,4 +1,5 @@
 from typing import List, Dict
+import uuid
 from ir import (
     CanonicalEvent, EventKind, ExecutionGraph, ExecutionNode, ExecutionEdge,
     GraphId, NodeId, EdgeId, GraphMetadata, NodeMetadata, EdgeMetadata,
@@ -11,11 +12,11 @@ class IRCompiler:
     This process is completely side-effect free.
     """
     
-    def compile(self, events: List[CanonicalEvent]) -> ExecutionGraph:
+    # 🌟 NEW: Accept an optional graph_id parameter
+    def compile(self, events: List[CanonicalEvent], graph_id: str = None) -> ExecutionGraph:
         nodes: Dict[NodeId, ExecutionNode] = {}
         edges: Dict[EdgeId, ExecutionEdge] = {}
         
-        # State tracking for matching START and END events
         active_spans = {}
         completed_node_ids = []
         workflow_start_time = "unknown"
@@ -27,21 +28,17 @@ class IRCompiler:
             elif event.kind == EventKind.WORKFLOW_END:
                 continue
                 
-            # MVP Correlation: extract the base ID (e.g., 'evt_span_1_start' -> 'span_1')
             base_id = event.id.replace("evt_", "").replace("_start", "").replace("_end", "")
             
             if event.kind in (EventKind.MODEL_START, EventKind.TOOL_START):
-                # Stash the input payload and metadata
                 active_spans[base_id] = event.payload
             
             elif event.kind in (EventKind.MODEL_END, EventKind.TOOL_END):
-                # Retrieve the matching start payload
                 start_payload = active_spans.pop(base_id, {})
                 
                 node_id = NodeId(f"n_{base_id}")
                 node_kind = NodeKind.MODEL if event.kind == EventKind.MODEL_END else NodeKind.TOOL
                 
-                # 1. Create the ExecutionNode
                 node = ExecutionNode(
                     id=node_id,
                     kind=node_kind,
@@ -51,7 +48,6 @@ class IRCompiler:
                 )
                 nodes[node_id] = node
                 
-                # 2. Wire the ExecutionEdge (Sequential MVP)
                 if completed_node_ids:
                     prev_node_id = completed_node_ids[-1]
                     edge_id = EdgeId(f"e_{prev_node_id}_to_{node_id}")
@@ -66,7 +62,9 @@ class IRCompiler:
                     
                 completed_node_ids.append(node_id)
 
-        # Assemble the immutable graph
+        # 🌟 Automatically generate a unique ID if one isn't provided
+        final_id = graph_id if graph_id else f"g_compiled_{uuid.uuid4().hex[:8]}"
+
         graph_meta = GraphMetadata(
             schema_version=IR_SCHEMA_VERSION,
             source_id="compiled_trace",
@@ -75,7 +73,7 @@ class IRCompiler:
         )
         
         return ExecutionGraph(
-            id=GraphId("g_compiled_001"),
+            id=GraphId(final_id),
             metadata=graph_meta,
             nodes=nodes,
             edges=edges

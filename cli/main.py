@@ -1,7 +1,7 @@
 import argparse
 from adapters.openinference.adapter import OpenInferenceAdapter
 from compiler import IRCompiler, PlanCompiler, ReplaySession
-from storage import LocalGraphStore
+from storage import SQLiteGraphStore
 from runtime import ReplayVM
 
 def compile_trace(args):
@@ -12,14 +12,14 @@ def compile_trace(args):
     graph = IRCompiler().compile(events)
     
     print("💾 Saving to local store...")
-    store = LocalGraphStore()
+    store = SQLiteGraphStore()
     saved_path = store.save(graph)
     
     print(f"✅ Success! Compiled graph '{graph.id}' saved to {saved_path}")
 
 def simulate_replay(args):
     print(f"📂 Loading graph '{args.graph_id}' from store...")
-    store = LocalGraphStore()
+    store = SQLiteGraphStore()
     
     try:
         graph = store.load(args.graph_id)

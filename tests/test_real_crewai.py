@@ -1,4 +1,5 @@
 import litellm
+import time
 from crewai import Agent, Task, Crew, LLM
 from crewai.tools import tool
 
@@ -8,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
     
-from storage import LocalGraphStore  # noqa: E402
+from storage import SQLiteGraphStore  # noqa: E402
 from compiler import IRCompiler, PlanCompiler, ReplaySession  # noqa: E402
 from runtime import ReplayVM  # noqa: E402
 from sdk import LiveRecorder  # noqa: E402
@@ -17,7 +18,7 @@ from env_utils import get_hf_token  # noqa: E402
 # 1. SETUP THE REAL LLM
 hf_token = get_hf_token()
 if not hf_token:
-    raise ValueError("🚨 Please set the HF_TOKEN environment variable or add it to .env before running.")
+    raise ValueError("🚨 Please set the HF_TOKEN environment variable or add it to .env.")
 
 hf_llm = LLM(
     model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -27,26 +28,22 @@ hf_llm = LLM(
 # 2. DEFINE A CUSTOM TOOL
 @tool("Get Weather")
 def get_weather(location: str) -> str:
-    """Useful to get the current weather for a given location. Always use this to check weather."""
+    """Useful to get the current weather for a given location."""
     print(f"    🛠️  [Tool Execution] Live fetching weather for {location}...")
     return f"The weather in {location} is 75F and sunny."
 
 # 3. THE MULTI-AGENT APP
 def run_multi_agent_workflow(llm):
     print("  App: Booting Multi-Agent CrewAI...")
-    
-    # Agent 1: The Researcher (Has access to the tool)
     researcher = Agent(
         role='Weather Researcher',
         goal='Find the current weather for a given city using your tools.',
-        backstory='You are a meticulous meteorologist. You MUST use the Get Weather tool to answer.',
+        backstory='You are a meticulous meteorologist.',
         tools=[get_weather],
-        verbose=True, # Turned on so you can see the ReAct loop in the terminal
+        verbose=True,
         allow_delegation=False,
         llm=llm
     )
-    
-    # Agent 2: The Planner (Takes Researcher's output and does something with it)
     planner = Agent(
         role='Activity Planner',
         goal='Plan a single outdoor activity based on the provided weather.',
@@ -55,35 +52,17 @@ def run_multi_agent_workflow(llm):
         allow_delegation=False,
         llm=llm
     )
+    research_task = Task(description='Get the weather for Tokyo.', expected_output='The current temperature and condition.', agent=researcher)
+    plan_task = Task(description='Based on the weather from the researcher, suggest one brief outdoor activity in Tokyo.', expected_output='A one-sentence activity suggestion.', agent=planner)
     
-    # Task 1: Research
-    research_task = Task(
-        description='Get the weather for Tokyo.',
-        expected_output='The current temperature and condition.',
-        agent=researcher
-    )
-    
-    # Task 2: Plan (CrewAI automatically passes Task 1's output into Task 2)
-    plan_task = Task(
-        description='Based on the weather from the researcher, suggest one brief outdoor activity in Tokyo.',
-        expected_output='A one-sentence activity suggestion.',
-        agent=planner
-    )
-    
-    crew = Crew(
-        agents=[researcher, planner], 
-        tasks=[research_task, plan_task], 
-        verbose=True
-    )
-    
+    crew = Crew(agents=[researcher, planner], tasks=[research_task, plan_task], verbose=True)
     result = crew.kickoff()
     print(f"\n  App: CrewAI Final Output -> {result.raw}")
-
 
 # 4. THE REPLAY ENGINE DEMO
 def test_crewai_autolog():
     # ---------------------------------------------------------
-    # PHASE 1: RECORD LIVE EXECUTION (REAL NETWORK CALLS)
+    # PHASE 1: RECORD LIVE EXECUTION
     # ---------------------------------------------------------
     print("==================================================")
     print("🔴 PHASE 1: RECORDING MULTI-AGENT EXECUTION")
@@ -93,29 +72,27 @@ def test_crewai_autolog():
     
     def extract_messages(*args, **kwargs):
         messages = kwargs.get("messages", [])
-        # We grab the last 500 characters of the prompt to identify the step.
-        # This avoids ExactMatcher failures if CrewAI injects dynamic timestamps into the prompt headers.
-        last_msg = messages[-1]["content"] if messages else ""
-        return {"prompt_snippet": last_msg[-500:]}
+        # Normalizing to avoid divergence
+        content = messages[-1]["content"] if messages else ""
+        return {"prompt_snippet": content[-500:]}
 
-    # Attach the Security Camera
     recorder.patch(litellm, "completion", extract_messages, "MODEL")
     
-    # Run the multi-agent workflow
     run_multi_agent_workflow(hf_llm)
     
-    # Compile and Save
+    # Compile and Save with unique ID
     events = recorder.finish()
-    graph = IRCompiler().compile(events)
-    store = LocalGraphStore()
+    unique_id = f"crewai_run_{int(time.time())}"
+    graph = IRCompiler().compile(events, graph_id=unique_id)
+    store = SQLiteGraphStore()
     store.save(graph)
-    print(f"\n💾 [System] Multi-Agent execution compiled to {graph.id}.json")
+    print(f"\n💾 [System] Multi-Agent execution saved as: {graph.id}")
 
     # ---------------------------------------------------------
-    # PHASE 2: DETERMINISTIC REPLAY (NO NETWORK)
+    # PHASE 2: DETERMINISTIC REPLAY
     # ---------------------------------------------------------
     print("\n==================================================")
-    print("🟢 PHASE 2: REPLAYING CREWAI (ZERO NETWORK CALLS)")
+    print(f"🟢 PHASE 2: REPLAYING {graph.id} (ZERO NETWORK)")
     print("==================================================")
     
     loaded_graph = store.load(graph.id)
@@ -127,17 +104,16 @@ def test_crewai_autolog():
         result = vm.advance(vm_input)
         
         if not result.success:
+            # We explicitly print what the VM received to help debug mismatches
+            print(f"DEBUG: VM received: {vm_input}")
             raise RuntimeError(f"Replay Divergence: {result.resolution.reason}")
             
-        print(f"  ✨ [Interceptor] Returning cached HuggingFace response for node '{result.resolution.node_id}'")
+        print(f"  ✨ [Replay Engine] Instant replay node match: '{result.resolution.node_id}'")
         
         from litellm import ModelResponse
         return ModelResponse(**result.output)
 
-    # Monkey-patch litellm directly with our custom hydrator
     litellm.completion = hydrated_interceptor
-
-    # Run the EXACT same CrewAI setup again. 
     run_multi_agent_workflow(hf_llm)
 
 if __name__ == "__main__":

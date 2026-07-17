@@ -1,4 +1,4 @@
 from .encoder import IRJSONEncoder
-from .store import LocalGraphStore
+from .db import SQLiteGraphStore
 
-__all__ = ["IRJSONEncoder", "LocalGraphStore"]
+__all__ = ["IRJSONEncoder", "SQLiteGraphStore"]
