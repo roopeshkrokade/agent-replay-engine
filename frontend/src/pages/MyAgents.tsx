@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { fetchAgents } from "../services/api.services";
 
 interface Agent {
   id: string;
@@ -11,80 +12,9 @@ interface Agent {
   version: string;
 }
 
-const agents: Agent[] = [
-  {
-    id: "1",
-    name: "Data_Scraper_Alpha",
-    status: "healthy",
-    timeCreated: "Oct 12, 2023 · 14:22",
-    lastExecution: "2 mins ago",
-    executionStatus: "success",
-    version: "v2.4.1-stable",
-  },
-  {
-    id: "2",
-    name: "Lead_Gen_Bot_01",
-    status: "error",
-    timeCreated: "Oct 10, 2023 · 09:15",
-    lastExecution: "Failed 1h ago",
-    executionStatus: "failed",
-    version: "v1.0.9-hotfix",
-  },
-  {
-    id: "3",
-    name: "Researcher_V3",
-    status: "inactive",
-    timeCreated: "Sep 28, 2023 · 21:05",
-    lastExecution: "Never executed",
-    executionStatus: "never",
-    version: "v3.0.0-beta",
-  },
-  {
-    id: "4",
-    name: "Social_Monitor_Global",
-    status: "healthy",
-    timeCreated: "Sep 22, 2023 · 11:30",
-    lastExecution: "15 mins ago",
-    executionStatus: "success",
-    version: "v1.2.0-stable",
-  },
-  {
-    id: "5",
-    name: "Log_Analyzer_System",
-    status: "healthy",
-    timeCreated: "Sep 15, 2023 · 04:12",
-    lastExecution: "Just now",
-    executionStatus: "success",
-    version: "v4.4.2-prod",
-  },
-  {
-    id: "6",
-    name: "Email_Responder_Auto",
-    status: "error",
-    timeCreated: "Sep 10, 2023 · 18:45",
-    lastExecution: "Timeout 12h ago",
-    executionStatus: "timeout",
-    version: "v0.9.8-dev",
-  },
-  {
-    id: "7",
-    name: "Audit_Trail_Scanner",
-    status: "healthy",
-    timeCreated: "Aug 30, 2023 · 13:00",
-    lastExecution: "3 hours ago",
-    executionStatus: "success",
-    version: "v1.1.0-stable",
-  },
-  {
-    id: "8",
-    name: "Legacy_Connector_X",
-    status: "inactive",
-    timeCreated: "Aug 12, 2023 · 10:20",
-    lastExecution: "3 months ago",
-    executionStatus: "never",
-    version: "v8.6.1-legacy",
-  },
-];
+// Agents are loaded from the backend API at `/api/agents`.
+// The backend returns objects with `agent_id`, `agent_name`, `latest_version`,
+// `created_at`, and `last_execution_timestamp`.
 
 const getStatusColor = (status: string) => {
   switch (status) {
@@ -132,9 +62,46 @@ const getVersionTextColor = (status: string) => {
 
 export default function MyAgents() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const healthyCount = agents.filter((a) => a.status === "healthy").length;
   const errorCount = agents.filter((a) => a.status === "error").length;
   const inactiveCount = agents.filter((a) => a.status === "inactive").length;
+
+  useEffect(() => {
+    const ac = new AbortController();
+    async function loadAgents() {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchAgents(ac.signal);
+        // Map backend shape to UI shape
+        const mapped: Agent[] = (data || []).map((a: any) => ({
+          id: a.agent_id,
+          name: a.agent_name,
+          status: a.last_execution_timestamp ? "healthy" : "inactive",
+          timeCreated: a.created_at
+            ? new Date(a.created_at).toLocaleString()
+            : "Unknown",
+          lastExecution: a.last_execution_timestamp
+            ? new Date(a.last_execution_timestamp).toLocaleString()
+            : "Never executed",
+          executionStatus: a.last_execution_timestamp ? "success" : "never",
+          version: a.latest_version || "unknown",
+        }));
+        setAgents(mapped);
+      } catch (err: any) {
+        if (err.name !== "AbortError") setError(err.message || String(err));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAgents();
+    return () => ac.abort();
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -176,58 +143,80 @@ export default function MyAgents() {
 
         {/* Table Body */}
         <div className="flex-1 overflow-y-auto">
-          {agents.map((agent) => (
-            <div
-              key={agent.id}
-              className="grid grid-cols-12 gap-4 px-6 py-4 border-b border-slate-700 hover:bg-slate-800/50 transition-colors items-center"
-            >
-              {/* Name with Status */}
-              <div className="col-span-4 flex items-center gap-3">
-                <div
-                  className={`w-2 h-2 rounded-full ${getStatusColor(agent.status)}`}
-                ></div>
-                <Link
-                  to={`/agents/${agent.id}`}
-                  className={`text-sm font-medium ${getStatusTextColor(agent.status)} hover:underline`}
-                >
-                  {agent.name}
-                </Link>
-              </div>
-
-              {/* Time Created */}
-              <div className="col-span-3 text-sm text-slate-400">
-                {agent.timeCreated}
-              </div>
-
-              {/* Last Execution */}
-              <div className="col-span-3">
-                <span
-                  className={`text-sm ${
-                    agent.executionStatus === "failed"
-                      ? "text-red-400"
-                      : agent.executionStatus === "timeout"
-                        ? "text-yellow-400"
-                        : agent.status === "inactive"
-                          ? "text-slate-400 opacity-50"
-                          : "text-slate-400"
-                  }`}
-                >
-                  {agent.lastExecution}
-                </span>
-              </div>
-
-              {/* Version */}
-              <div className="col-span-2 text-right">
-                <span
-                  className={`inline-block px-2 py-1 rounded text-xs font-mono ${getVersionBgColor(
-                    agent.status,
-                  )} ${getVersionTextColor(agent.status)}`}
-                >
-                  {agent.version}
-                </span>
-              </div>
+          {loading ? (
+            <div className="p-6 text-center text-slate-400">
+              Loading agents...
             </div>
-          ))}
+          ) : error ? (
+            <div className="p-6 text-center">
+              <div className="text-red-400 mb-2">
+                Error loading agents: {error}
+              </div>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-amber-600 text-slate-900 rounded text-xs font-bold"
+              >
+                Retry
+              </button>
+            </div>
+          ) : agents.length === 0 ? (
+            <div className="p-6 text-center text-slate-400">
+              No agents found.
+            </div>
+          ) : (
+            agents.map((agent) => (
+              <div
+                key={agent.id}
+                className="grid grid-cols-12 gap-4 px-6 py-4 border-b border-slate-700 hover:bg-slate-800/50 transition-colors items-center"
+              >
+                {/* Name with Status */}
+                <div className="col-span-4 flex items-center gap-3">
+                  <div
+                    className={`w-2 h-2 rounded-full ${getStatusColor(agent.status)}`}
+                  ></div>
+                  <Link
+                    to={`/agents/${agent.id}`}
+                    className={`text-sm font-medium ${getStatusTextColor(agent.status)} hover:underline`}
+                  >
+                    {agent.name}
+                  </Link>
+                </div>
+
+                {/* Time Created */}
+                <div className="col-span-3 text-sm text-slate-400">
+                  {agent.timeCreated}
+                </div>
+
+                {/* Last Execution */}
+                <div className="col-span-3">
+                  <span
+                    className={`text-sm ${
+                      agent.executionStatus === "failed"
+                        ? "text-red-400"
+                        : agent.executionStatus === "timeout"
+                          ? "text-yellow-400"
+                          : agent.status === "inactive"
+                            ? "text-slate-400 opacity-50"
+                            : "text-slate-400"
+                    }`}
+                  >
+                    {agent.lastExecution}
+                  </span>
+                </div>
+
+                {/* Version */}
+                <div className="col-span-2 text-right">
+                  <span
+                    className={`inline-block px-2 py-1 rounded text-xs font-mono ${getVersionBgColor(
+                      agent.status,
+                    )} ${getVersionTextColor(agent.status)}`}
+                  >
+                    {agent.version}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

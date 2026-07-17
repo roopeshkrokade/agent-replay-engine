@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   Play,
@@ -13,6 +13,14 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import {
+  fetchAgentVersions,
+  replayRecord,
+  replayRecordWithInput,
+} from "../services/api.services";
+
+import { AnsiUp } from "ansi_up";
+import DOMPurify from "dompurify";
 
 // Small route/waypoint glyph used next to each version — a custom SVG
 // since it needs to closely match a specific mark rather than a stock icon.
@@ -44,58 +52,17 @@ interface LogEntry {
   timestamp: string;
   level: "SYSTEM" | "KERNEL" | "MODEL" | "EVENT" | "DATABASE" | "ERROR";
   message: string;
+  html?: string;
   highlight?: boolean;
   italic?: boolean;
+  id?: string;
+  mounted?: boolean;
 }
 
-const mockLogs: LogEntry[] = [
-  {
-    timestamp: "10:42:01.034",
-    level: "SYSTEM",
-    message: "Initializing Agent Replay Engine v5.2.4...",
-  },
-  {
-    timestamp: "10:42:01.442",
-    level: "KERNEL",
-    message: "Mounting virtual workspace: /agents/cs-bot-v5",
-  },
-  {
-    timestamp: "10:42:01.890",
-    level: "MODEL",
-    message: "Handshake with LLM provider successful. Latency: 42ms",
-    italic: true,
-  },
-  {
-    timestamp: "10:42:02.102",
-    level: "EVENT",
-    message: 'User Input Received: "Where is my order #5521?"',
-    highlight: true,
-  },
-  {
-    timestamp: "10:42:02.315",
-    level: "MODEL",
-    message:
-      "Thought Process: Checking database for order ID 5521. Cross-referencing with customer ID 883.",
-  },
-  {
-    timestamp: "10:42:03.112",
-    level: "DATABASE",
-    message: "Query OK: Row fetched in 12ms. Status: SHIPPED.",
-  },
-  {
-    timestamp: "10:42:03.400",
-    level: "EVENT",
-    message:
-      'Agent Response Generated: "Your order #5521 was shipped on Tuesday..."',
-  },
-];
+const mockLogs: LogEntry[] = [];
 
 const versionList = [
   { name: "v5.2.4-stable", status: "healthy", selected: true },
-  { name: "v5.1.0-rc", status: "warning", selected: false },
-  { name: "v4.8.9", status: "inactive", selected: false },
-  { name: "v4.8.8", status: "inactive", selected: false },
-  { name: "v4.7.2", status: "error", selected: false },
 ];
 
 const getLevelColor = (level: string) => {
@@ -134,6 +101,14 @@ const getStatusColor = (status: string) => {
 
 // Renders a log message, highlighting quoted text and file paths in amber
 const renderMessage = (log: LogEntry) => {
+  if (log.html) {
+    return (
+      <span
+        className={log.italic ? "italic text-slate-400" : "text-slate-200"}
+        dangerouslySetInnerHTML={{ __html: log.html }}
+      />
+    );
+  }
   const parts = log.message.split(/("(?:[^"]*)"|\/[a-zA-Z0-9\-_/.]+)/g);
   return (
     <span className={log.italic ? "italic text-slate-400" : "text-slate-200"}>
@@ -155,6 +130,21 @@ const renderMessage = (log: LogEntry) => {
 
 export default function AgentWorkspace() {
   const { agentId } = useParams<{ agentId: string }>();
+  const [versions, setVersions] = useState(() => versionList as any[]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionsError, setVersionsError] = useState<string | null>(null);
+  const [replayingRecordId, setReplayingRecordId] = useState<string | null>(
+    null,
+  );
+  const [replayResult, setReplayResult] = useState<any | null>(null);
+  const [replayError, setReplayError] = useState<string | null>(null);
+  const [divergenceExpectedInput, setDivergenceExpectedInput] = useState<
+    any | null
+  >(null);
+  const [failedRecordId, setFailedRecordId] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>(mockLogs);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
   const [currentTime, setCurrentTime] = useState(4.2);
   const [isPlaying, setIsPlaying] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -170,10 +160,199 @@ export default function AgentWorkspace() {
     )}:${String(ms).padStart(2, "0").slice(0, 2)}`;
   };
 
+  // Parse an API error message like "API error 400: { ... }" and extract a concise summary and expected/got fields
+  const parseApiError = (msg: string) => {
+    const out: { summary: string; expected?: string; got?: string } = {
+      summary: msg,
+    };
+    try {
+      // status code if present
+      const statusMatch = String(msg).match(/^API error\s*(\d+):/);
+      const status = statusMatch ? statusMatch[1] : null;
+
+      // find JSON part
+      const firstBrace = msg.indexOf("{");
+      const jsonPart = firstBrace >= 0 ? msg.slice(firstBrace) : null;
+      let body: any = null;
+      if (jsonPart) {
+        try {
+          body = JSON.parse(jsonPart);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      const detailText =
+        body?.detail && typeof body.detail === "string"
+          ? body.detail
+          : body || msg;
+
+      // extract Expected / got if present
+      const expMatch = String(detailText).match(
+        /Expected\s+([\s\S]*?)\s*,\s*got/,
+      );
+      if (expMatch && expMatch[1]) {
+        // try to clean up single quotes
+        const cleaned = expMatch[1]
+          .replace(/None/g, "null")
+          .replace(/True/g, "true")
+          .replace(/False/g, "false")
+          .replace(/'/g, '"');
+        try {
+          const parsed = JSON.parse(cleaned);
+          out.expected = JSON.stringify(parsed, null, 2);
+        } catch (e) {
+          out.expected = expMatch[1].trim();
+        }
+      }
+
+      const gotMatch = String(detailText).match(/got\s+([\s\S]*?)$/);
+      if (gotMatch && gotMatch[1]) {
+        const cleaned = gotMatch[1]
+          .trim()
+          .replace(/None/g, "null")
+          .replace(/True/g, "true")
+          .replace(/False/g, "false")
+          .replace(/'/g, '"');
+        try {
+          const parsed = JSON.parse(cleaned);
+          out.got = JSON.stringify(parsed, null, 2);
+        } catch (e) {
+          out.got = gotMatch[1].trim();
+        }
+      }
+
+      // compose summary
+      if (status && typeof detailText === "string") {
+        const oneLine = String(detailText).split("\n")[0];
+        out.summary = `API error ${status}: ${oneLine}`;
+      } else if (body && body.detail) {
+        out.summary = String(body.detail).split("\n")[0];
+      }
+    } catch (e) {
+      out.summary = msg;
+    }
+    return out;
+  };
+
+  // Helper to append a properly-typed LogEntry
+  const ansiUp = new AnsiUp();
+  const addLog = (level: LogEntry["level"], message: string, html?: string) => {
+    const now = new Date();
+    const ts =
+      now.toTimeString().split(" ")[0] +
+      "." +
+      String(now.getMilliseconds()).padStart(3, "0");
+    const id = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    const entry: LogEntry = {
+      id,
+      mounted: false,
+      timestamp: ts,
+      level,
+      message,
+      html,
+    };
+    setLogs((s) => [...s, entry]);
+    // trigger mount animation on next tick
+    setTimeout(() => {
+      setLogs((s) => s.map((l) => (l.id === id ? { ...l, mounted: true } : l)));
+    }, 20);
+  };
+
+  const stripAnsi = (s: string) => {
+    return s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+  };
+
+  // Streaming log reveal: schedule lines to appear one-by-one with animation
+  const streamIdRef = React.useRef(0);
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+  const streamLogs = async (
+    level: LogEntry["level"],
+    raw: string | undefined,
+  ) => {
+    if (!raw) return;
+    const rawStr = String(raw);
+    const lines = rawStr.split(/\r?\n/).filter((l) => stripAnsi(l).trim());
+    if (!lines.length) return;
+    const myStream = ++streamIdRef.current;
+
+    for (let i = 0; i < lines.length; i++) {
+      // stop if a new stream started
+      if (myStream !== streamIdRef.current) return;
+      const line = lines[i];
+      const plain = stripAnsi(line).trim();
+      try {
+        const html = ansiUp.ansi_to_html(line);
+        const safe = DOMPurify.sanitize(html);
+        addLog(level, plain, safe);
+      } catch (e) {
+        addLog(level, plain);
+      }
+      // after adding a log, if auto-scroll is enabled, scroll to bottom smoothly
+      if (autoScrollEnabled && logsContainerRef.current) {
+        try {
+          logsContainerRef.current.scrollTo({
+            top: logsContainerRef.current.scrollHeight,
+            behavior: "smooth",
+          });
+        } catch (e) {
+          logsContainerRef.current.scrollTop =
+            logsContainerRef.current.scrollHeight;
+        }
+      }
+      // delay between entries (slightly variable for natural feel)
+      const delay = 25 + Math.min(200, 8 * String(plain).length);
+      await sleep(delay);
+    }
+  };
+
   const agentName = agentId
     ? decodeURIComponent(agentId)
     : "Customer Support Bot";
   const playheadPct = (currentTime / maxTime) * 100;
+
+  // Load versions for the selected agent
+  React.useEffect(() => {
+    if (!agentId) return;
+    const id = agentId; // capture non-null agentId for the async loader
+    const ac = new AbortController();
+    async function load() {
+      setVersionsLoading(true);
+      setVersionsError(null);
+      try {
+        const data = await fetchAgentVersions(id, ac.signal);
+        // map to UI shape
+        const mapped = (data || []).map((v: any, i: number) => ({
+          name: v.version ? `v${v.version}` : v.record_id || `v${i}`,
+          status: v.last_execution_timestamp ? "healthy" : "inactive",
+          selected: i === 0,
+          recordId: v.record_id,
+          createdAt: v.created_at,
+        }));
+        setVersions(mapped);
+      } catch (err: any) {
+        if (err.name !== "AbortError")
+          setVersionsError(err.message || String(err));
+      } finally {
+        setVersionsLoading(false);
+      }
+    }
+    load();
+    return () => ac.abort();
+  }, [agentId]);
+
+  // Auto-scroll when logs change if enabled
+  useEffect(() => {
+    if (!autoScrollEnabled) return;
+    const c = logsContainerRef.current;
+    if (!c) return;
+    try {
+      c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
+    } catch (e) {
+      c.scrollTop = c.scrollHeight;
+    }
+  }, [logs, autoScrollEnabled]);
 
   return (
     <div className="flex flex-col h-full">
@@ -234,27 +413,248 @@ export default function AgentWorkspace() {
               Versions
             </div>
             <div className="space-y-0.5">
-              {versionList.map((version) => (
-                <div
-                  key={version.name}
-                  className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-mono border-l-2 ${
-                    version.selected
-                      ? "bg-slate-800 border-amber-500"
-                      : "border-transparent hover:bg-slate-800/50 cursor-pointer"
-                  }`}
-                >
-                  <VersionIcon className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
-                  <span className="text-slate-300 flex-1 truncate">
-                    {version.name}
-                  </span>
-                  <div
-                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getStatusColor(
-                      version.status,
-                    )}`}
-                  ></div>
+              {versionsLoading ? (
+                <div className="px-3 py-2 text-sm text-slate-400">
+                  Loading versions...
                 </div>
-              ))}
+              ) : versionsError ? (
+                <div className="px-3 py-2 text-sm text-red-400">
+                  Error: {versionsError}
+                </div>
+              ) : (
+                versions.map((version) => (
+                  <div
+                    key={version.name}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-mono border-l-2 ${
+                      version.selected
+                        ? "bg-slate-800 border-amber-500"
+                        : "border-transparent hover:bg-slate-800/50 cursor-pointer"
+                    }`}
+                  >
+                    <VersionIcon className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                    <span className="text-slate-300 flex-1 truncate">
+                      {version.name}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {version.recordId ? (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setReplayResult(null);
+                            setReplayError(null);
+                            setFailedRecordId(null);
+                            setLogs([]); // clear previous logs for a fresh replay stream
+                            setReplayingRecordId(version.recordId);
+                            try {
+                              const res = await replayRecord(version.recordId);
+                              setReplayResult(res);
+                              // append logs to main viewer
+                              try {
+                                await streamLogs(
+                                  "SYSTEM",
+                                  res.logs ||
+                                    res.message ||
+                                    JSON.stringify(res),
+                                );
+                              } catch (e) {
+                                // ignore logging errors
+                              }
+                              setFailedRecordId(null);
+                            } catch (err: any) {
+                              const msg = err?.message || String(err);
+                              setReplayError(msg);
+                              // append a concise, parsed error to logs
+                              try {
+                                const parsed = parseApiError(msg);
+                                if (parsed.expected) {
+                                  addLog(
+                                    "EVENT",
+                                    "Expected: " + (parsed.expected ?? ""),
+                                  );
+                                  if (parsed.got)
+                                    addLog(
+                                      "MODEL",
+                                      "Got: " + (parsed.got ?? ""),
+                                    );
+                                } else {
+                                  addLog("ERROR", parsed.summary);
+                                }
+                              } catch (e) {
+                                // ignore
+                              }
+                              // Detect API JSON body with detail — be tolerant to multi-line and Python-style dicts
+                              try {
+                                // Try to find JSON object in the error message (slice from first '{')
+                                const firstBrace = msg.indexOf("{");
+                                const jsonPart =
+                                  firstBrace >= 0 ? msg.slice(firstBrace) : msg;
+                                let body: any = null;
+                                try {
+                                  body = JSON.parse(jsonPart);
+                                } catch (e) {
+                                  // ignore
+                                }
+
+                                const detailText =
+                                  body?.detail &&
+                                  typeof body.detail === "string"
+                                    ? body.detail
+                                    : msg;
+
+                                // Flexible parse helper for Python-style dicts or single-quoted JSON
+                                const tryParseFlexible = (s: string) => {
+                                  try {
+                                    return JSON.parse(s);
+                                  } catch (e) {
+                                    try {
+                                      // convert single quotes to double quotes, None/True/False -> null/true/false
+                                      let t = s
+                                        .replace(/None/g, "null")
+                                        .replace(/True/g, "true")
+                                        .replace(/False/g, "false");
+                                      t = t.replace(/'/g, '"');
+                                      return JSON.parse(t);
+                                    } catch (e2) {
+                                      return null;
+                                    }
+                                  }
+                                };
+
+                                // Try to extract Expected {...} (allow multiline with [\s\S])
+                                const m = String(detailText).match(
+                                  /Expected\s+([\s\S]*?)\s*,\s*got/,
+                                );
+                                if (m && m[1]) {
+                                  const parsed = tryParseFlexible(m[1]);
+                                  if (parsed) {
+                                    setDivergenceExpectedInput(parsed);
+                                    setFailedRecordId(version.recordId);
+                                  }
+                                } else {
+                                  // fallback: try to parse detailText as JSON and look for .detail.expected
+                                  try {
+                                    const parsedBody =
+                                      typeof detailText === "string"
+                                        ? tryParseFlexible(detailText)
+                                        : detailText;
+                                    if (parsedBody && parsedBody.expected) {
+                                      setDivergenceExpectedInput(
+                                        parsedBody.expected,
+                                      );
+                                      setFailedRecordId(version.recordId);
+                                    }
+                                  } catch (e) {
+                                    // ignore
+                                  }
+                                }
+                              } catch (e) {
+                                // ignore non-json
+                              }
+                            } finally {
+                              setReplayingRecordId(null);
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-amber-600 text-slate-900 rounded"
+                        >
+                          {replayingRecordId === version.recordId
+                            ? "Replaying..."
+                            : "Replay"}
+                        </button>
+                      ) : null}
+                      <div
+                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getStatusColor(version.status)}`}
+                      ></div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
+            {/* Replay result panel */}
+            {replayResult || replayError || divergenceExpectedInput ? (
+              <div className="mt-3 px-3">
+                {replayError ? (
+                  <div className="text-sm text-red-400">
+                    {parseApiError(replayError).summary}
+                  </div>
+                ) : null}
+
+                {divergenceExpectedInput ? (
+                  <div className="mt-2 text-sm text-slate-300">
+                    <div className="font-semibold text-slate-200">
+                      Replay Divergence Detected
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">
+                      Expected input found in record:
+                    </div>
+                    <pre className="mt-2 max-h-40 overflow-auto text-xs whitespace-pre-wrap bg-slate-800 p-2 rounded text-slate-200 font-mono">
+                      {JSON.stringify(divergenceExpectedInput, null, 2)}
+                    </pre>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={async () => {
+                          if (!divergenceExpectedInput) return;
+                          // Use the expected input to retry replay
+                          setReplayError(null);
+                          setReplayResult(null);
+                          setLogs([]); // clear logs before retrying replay with expected input
+                          const recordId =
+                            failedRecordId ||
+                            versions.find((v) => v.recordId)?.recordId;
+                          if (!recordId) return;
+                          setReplayingRecordId(recordId);
+                          try {
+                            const res = await replayRecordWithInput(
+                              recordId,
+                              divergenceExpectedInput,
+                            );
+                            setReplayResult(res);
+                            // append logs (streamed)
+                            try {
+                              await streamLogs(
+                                "SYSTEM",
+                                res.logs || res.message || JSON.stringify(res),
+                              );
+                            } catch (e) {}
+                            setDivergenceExpectedInput(null);
+                            setFailedRecordId(null);
+                          } catch (err: any) {
+                            const msg = err?.message || String(err);
+                            setReplayError(msg);
+                            // append parsed summary + expected to logs
+                            try {
+                              const parsed = parseApiError(msg);
+                              if (parsed.expected) {
+                                addLog(
+                                  "EVENT",
+                                  "Expected: " + (parsed.expected ?? ""),
+                                );
+                                if (parsed.got)
+                                  addLog("MODEL", "Got: " + (parsed.got ?? ""));
+                              } else {
+                                addLog("ERROR", parsed.summary);
+                              }
+                            } catch (e) {}
+                          } finally {
+                            setReplayingRecordId(null);
+                          }
+                        }}
+                        className="px-3 py-1 bg-amber-600 text-slate-900 rounded text-xs"
+                      >
+                        Replay With Expected Input
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {replayResult ? (
+                  <div className="text-sm text-slate-300">
+                    <div className="font-semibold text-slate-200">
+                      {replayResult?.message || "Replay result"}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="border-t border-slate-800 p-4">
@@ -303,16 +703,49 @@ export default function AgentWorkspace() {
           </div>
 
           {/* Log Viewer */}
-          <div className="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs sm:text-sm">
+          <div
+            ref={logsContainerRef}
+            onScroll={(e) => {
+              const el = e.currentTarget as HTMLDivElement;
+              const distanceFromBottom =
+                el.scrollHeight - el.scrollTop - el.clientHeight;
+              // if user scrolled away more than 60px, pause auto-scroll
+              if (distanceFromBottom > 60) {
+                setAutoScrollEnabled(false);
+              } else {
+                setAutoScrollEnabled(true);
+              }
+            }}
+            className="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs sm:text-sm relative"
+          >
+            {!autoScrollEnabled ? (
+              <div className="absolute top-2 right-4 z-20">
+                <button
+                  onClick={() => {
+                    const c = logsContainerRef.current;
+                    if (!c) return;
+                    try {
+                      c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
+                    } catch (e) {
+                      c.scrollTop = c.scrollHeight;
+                    }
+                    setAutoScrollEnabled(true);
+                  }}
+                  className="px-2 py-1 bg-slate-800/80 text-slate-200 rounded text-xs border border-slate-700"
+                >
+                  Jump to latest
+                </button>
+              </div>
+            ) : null}
             <div className="space-y-1">
-              {mockLogs.map((log, idx) => (
+              {logs.map((log, idx) => (
                 <div
-                  key={idx}
+                  key={log.id ?? idx}
                   className={`flex flex-col sm:flex-row gap-1 sm:gap-4 ${
                     log.highlight
                       ? "bg-red-950/20 px-2 py-1.5 rounded"
                       : "px-1 py-1 sm:px-0 sm:py-0"
-                  }`}
+                  } ${log.mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-1"} transition-all duration-300 ease-out`}
                 >
                   <div className="flex items-center gap-2 sm:contents">
                     <span className="text-slate-600 flex-shrink-0 sm:min-w-fit">

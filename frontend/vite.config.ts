@@ -11,6 +11,16 @@ export default defineConfig(async () => {
       outDir: "dist",
       emptyOutDir: true,
     },
+    // Proxy API requests during development to the backend server
+    server: {
+      proxy: {
+        "/api": {
+          target: "http://localhost:5000",
+          changeOrigin: true,
+          secure: false,
+        },
+      },
+    },
     base: "./",
   };
 });
