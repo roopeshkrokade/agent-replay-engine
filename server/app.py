@@ -6,6 +6,9 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from typing import List, Dict
+import litellm
+from crewai import LLM
+from env_utils import get_hf_token
 
 # Ensure root directory is in the path to import engine components
 BASE_DIR = Path(__file__).resolve().parent
@@ -14,12 +17,12 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from storage.db import SQLiteGraphStore  # noqa: E402
-import litellm  # noqa: E402
-from crewai import LLM  # noqa: E402
 from compiler import PlanCompiler, ReplaySession  # noqa: E402
 from runtime import ReplayVM  # noqa: E402
-from env_utils import get_hf_token  # noqa: E402
-from run_live_agent import run_multi_agent_workflow  # noqa: E402
+
+# 🌟 UPDATED IMPORTS: Pointing to your newly renamed files!
+from run_live_crewai import run_multi_agent_workflow  # noqa: E402
+from run_live_autogen import run_autogen_workflow  # noqa: E402
 
 app = FastAPI(
     title="Agent Replay API",
@@ -101,19 +104,13 @@ def delete_run(record_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------------------------------------------------
-# 🌟 NEW: THE REPLAY ENDPOINT 🌟
+# 🌟 THE REPLAY ENDPOINT (NOW WITH AUTOGEN ROUTING) 🌟
 # ---------------------------------------------------------
 @app.post("/api/runs/{record_id}/replay", summary="Trigger Engine Replay")
 def replay_agent_run(record_id: str):
-    """
-    Dynamically loads the graph, intercepts the network, runs the CrewAI app,
-    and returns the captured terminal logs of the execution.
-    """
     try:
-        # 1. Load the recorded trace
         loaded_graph = store.load(record_id)
         
-        # 2. Setup the VM
         plan = PlanCompiler().compile(loaded_graph, ReplaySession(mode="CACHE"))
         vm = ReplayVM(plan)
         
@@ -131,10 +128,8 @@ def replay_agent_run(record_id: str):
             from litellm import ModelResponse
             return ModelResponse(**result.output)
 
-        # 3. Save the original LiteLLM function so we can restore it later
         original_completion = litellm.completion
         
-        # 4. Patch and Execute (while capturing the terminal output)
         output_buffer = io.StringIO()
         try:
             litellm.completion = hydrated_interceptor
@@ -143,11 +138,13 @@ def replay_agent_run(record_id: str):
             if not hf_token:
                 raise RuntimeError("HF_TOKEN missing from environment.")
             
-            hf_llm = LLM(model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct", api_key=hf_token)
-            
-            # Capture the CrewAI output into our buffer instead of the terminal
+            # 🌟 ROUTER: Boot the correct framework based on the agent ID
             with redirect_stdout(output_buffer):
-                run_multi_agent_workflow(hf_llm)
+                if "autogen" in record_id:
+                    run_autogen_workflow(hf_token)
+                else:
+                    hf_llm = LLM(model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct", api_key=hf_token)
+                    run_multi_agent_workflow(hf_llm)
                 
             logs = output_buffer.getvalue()
             
@@ -160,7 +157,6 @@ def replay_agent_run(record_id: str):
         except Exception as inner_e:
             raise inner_e
         finally:
-            # 5. VERY IMPORTANT: Restore normal network capabilities for the server
             litellm.completion = original_completion
             output_buffer.close()
             
