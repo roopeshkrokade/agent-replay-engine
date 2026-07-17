@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@import "./theme.css";
+
+html,
+body,
+#root {
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* prevent page-level scrolling */
+}
+
+body {
+  background-color: #0f1724; /* Tailwind slate-900 */
+  color: #f1f5f9; /* Tailwind slate-100 */
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial;
+}
+
+.app-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* ensure the shell does not produce page scrollbars */
+}
+.main-content {
+  padding: 1rem;
+  flex: 1 1 auto;
+  min-height: 0; /* allow children to scroll properly */
+  overflow: auto; /* inner scrolling only */
+  -webkit-overflow-scrolling: touch;
+}

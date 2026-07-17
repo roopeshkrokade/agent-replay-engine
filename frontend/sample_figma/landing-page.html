@@ -1,0 +1,726 @@
+<!doctype html>
+
+<html class="dark" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Agent Replay | Deterministic Reliability for AI</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "tertiary-fixed": "#cde5ff",
+              primary: "#ffb690",
+              "outline-variant": "#584237",
+              "on-tertiary-fixed": "#001d32",
+              "on-surface-variant": "#e0c0b1",
+              "on-error-container": "#ffdad6",
+              tertiary: "#93ccff",
+              "inverse-on-surface": "#2d3137",
+              "on-background": "#dfe2eb",
+              "on-primary-fixed-variant": "#783200",
+              "error-container": "#93000a",
+              "tertiary-container": "#00a2f4",
+              secondary: "#bcc7de",
+              "inverse-primary": "#9d4300",
+              "secondary-fixed": "#d8e3fb",
+              "inverse-surface": "#dfe2eb",
+              "primary-container": "#f97316",
+              "on-tertiary": "#003351",
+              "on-secondary-fixed-variant": "#3c475a",
+              "surface-tint": "#ffb690",
+              "primary-fixed": "#ffdbca",
+              "on-error": "#690005",
+              "on-secondary-container": "#aeb9d0",
+              "tertiary-fixed-dim": "#93ccff",
+              "on-secondary-fixed": "#111c2d",
+              "on-tertiary-container": "#003554",
+              "on-primary": "#552100",
+              "surface-dim": "#10141a",
+              "secondary-fixed-dim": "#bcc7de",
+              "on-surface": "#dfe2eb",
+              "on-primary-container": "#582200",
+              "surface-container-low": "#181c22",
+              "primary-fixed-dim": "#ffb690",
+              "surface-container-lowest": "#0a0e14",
+              error: "#ffb4ab",
+              "surface-variant": "#31353c",
+              "on-secondary": "#263143",
+              "on-tertiary-fixed-variant": "#004b74",
+              background: "#10141a",
+              "surface-container-highest": "#31353c",
+              "surface-container-high": "#262a31",
+              "on-primary-fixed": "#341100",
+              "surface-bright": "#353940",
+              "surface-container": "#1c2026",
+              surface: "#10141a",
+              "secondary-container": "#3e495d",
+              outline: "#a78b7d",
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+            spacing: {
+              gutter: "1rem",
+              "sidebar-width": "260px",
+              "toolbar-height": "48px",
+              "container-padding": "1.5rem",
+              base: "4px",
+            },
+            fontFamily: {
+              "display-lg": ["Inter"],
+              "body-md": ["Inter"],
+              "code-sm": ["JetBrains Mono"],
+              "label-caps": ["Inter"],
+              "headline-md": ["Inter"],
+              "code-md": ["JetBrains Mono"],
+              "body-sm": ["Inter"],
+            },
+            fontSize: {
+              "display-lg": [
+                "32px",
+                {
+                  lineHeight: "40px",
+                  letterSpacing: "-0.02em",
+                  fontWeight: "600",
+                },
+              ],
+              "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+              "code-sm": ["12px", { lineHeight: "16px", fontWeight: "400" }],
+              "label-caps": [
+                "11px",
+                {
+                  lineHeight: "16px",
+                  letterSpacing: "0.05em",
+                  fontWeight: "600",
+                },
+              ],
+              "headline-md": [
+                "20px",
+                { lineHeight: "28px", fontWeight: "600" },
+              ],
+              "code-md": ["13px", { lineHeight: "20px", fontWeight: "450" }],
+              "body-sm": ["13px", { lineHeight: "18px", fontWeight: "400" }],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      body {
+        background-color: #0d1117;
+        color: #dfe2eb;
+        font-family: "Inter", sans-serif;
+        overflow-x: hidden;
+      }
+      .code-font {
+        font-family: "JetBrains Mono", monospace;
+      }
+      .glass-panel {
+        background: rgba(22, 27, 34, 0.8);
+        backdrop-filter: blur(8px);
+        border: 1px solid #30363d;
+      }
+      .pipeline-line {
+        background: linear-gradient(
+          90deg,
+          #30363d 0%,
+          #ffb690 50%,
+          #30363d 100%
+        );
+        background-size: 200% 100%;
+        animation: flow 3s linear infinite;
+      }
+      @keyframes flow {
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: 0% 0;
+        }
+      }
+    </style>
+  </head>
+  <body
+    class="bg-background selection:bg-primary-container selection:text-on-primary-container"
+  >
+    <!-- Top Navigation Bar -->
+    <nav
+      class="bg-surface w-full h-toolbar-height sticky top-0 z-50 border-b border-outline-variant flex justify-between items-center px-gutter"
+    >
+      <div class="flex items-center gap-8">
+        <span
+          class="font-headline-md text-headline-md text-primary tracking-tight font-extrabold cursor-pointer"
+          >Agent Replay</span
+        >
+        <div class="hidden md:flex gap-6">
+          <a
+            class="text-primary font-bold border-b-2 border-primary py-2 font-body-md text-body-md"
+            href="#"
+            >Home</a
+          >
+          <a
+            class="text-on-surface-variant font-medium hover:text-primary transition-colors duration-200 font-body-md text-body-md"
+            href="#"
+            >My Agents</a
+          >
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <!-- Search Bar Emulation -->
+        <div class="relative hidden lg:flex items-center">
+          <span
+            class="material-symbols-outlined absolute left-3 text-on-surface-variant scale-75"
+            >search</span
+          >
+          <input
+            class="bg-surface-container-lowest border border-outline-variant rounded-full pl-9 pr-4 py-1 text-sm focus:border-primary focus:ring-0 w-64 text-on-surface"
+            placeholder="Search traces..."
+            type="text"
+          />
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors"
+          >
+            notifications
+          </button>
+          <button
+            class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors"
+          >
+            settings
+          </button>
+          <div
+            class="w-8 h-8 rounded-full border border-outline-variant overflow-hidden cursor-pointer active:opacity-80"
+          >
+            <img
+              class="w-full h-full object-cover"
+              data-alt="A professional headshot of a software engineer in a clean tech environment, soft studio lighting, focused gaze, minimalist background with tech hardware bokeh, primary orange accents in the lighting, dark aesthetic."
+              src="https://lh3.googleusercontent.com/aida-public/AB6AXuCjoj5aBShJ9WsdHP1g8ZckesxVi7MwYQU--LEO8SqjS6b4Ly-Bdc4e7F0_w3n84hmTSvGdVSO8rFpMb4mSokBMh4VvHfVg3HT93nCwLkEzEG2_3d9uxgfmCq1pyaU4PHNconsoO4GX5gnH2neA3zdoIYklj-rms5oC-k1Fy-dsicW3yIAozW_CKA62pFCHFqWSSwjHmbQ6pPMW_CE1r1O8IWZ51sxM7D7YbNt9ueodvK6EeBmKMUk"
+            />
+          </div>
+        </div>
+      </div>
+    </nav>
+    <main class="relative">
+      <!-- Hero Section -->
+      <section
+        class="relative h-[870px] flex flex-col items-center justify-center text-center px-6 overflow-hidden"
+      >
+        <!-- Background Shader -->
+        <div class="absolute inset-0 z-0 opacity-40"></div>
+        <!-- Hero Content -->
+        <div class="relative z-10 max-w-4xl space-y-6">
+          <div
+            class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary font-label-caps text-label-caps mb-4"
+          >
+            <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+            v2.4 Engine Now Deterministic
+          </div>
+          <h1
+            class="font-display-lg text-display-lg md:text-6xl text-on-surface tracking-tight leading-tight"
+          >
+            Deterministic Reliability for <br />
+            <span class="text-primary">Autonomous AI Systems</span>
+          </h1>
+          <p
+            class="text-on-surface-variant max-w-2xl mx-auto font-body-md text-body-md md:text-lg"
+          >
+            Capture, replay, and debug complex LLM agent interactions with
+            millisecond precision. Eliminate the "black box" of stochastic agent
+            behavior once and for all.
+          </p>
+          <div class="flex flex-col sm:flex-row gap-4 justify-center pt-8">
+            <button
+              class="bg-primary-container text-on-primary-container px-8 py-3 rounded font-bold hover:brightness-110 transition-all flex items-center gap-2"
+            >
+              Get Started
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </button>
+            <button
+              class="border border-outline-variant text-on-surface px-8 py-3 rounded font-bold hover:bg-surface-container-highest transition-all"
+            >
+              View Demo
+            </button>
+          </div>
+        </div>
+      </section>
+      <!-- Technical Illustration: Pipeline -->
+      <section
+        class="py-24 bg-surface-container-lowest border-y border-outline-variant"
+      >
+        <div class="max-w-6xl mx-auto px-6">
+          <div class="text-center mb-16">
+            <h2 class="font-headline-md text-headline-md text-on-surface mb-2">
+              The Execution Pipeline
+            </h2>
+            <p class="text-on-surface-variant font-body-md">
+              Universal capture for any LLM-powered application
+            </p>
+          </div>
+          <div
+            class="relative flex flex-col lg:flex-row items-center justify-between gap-12 py-12"
+          >
+            <!-- Flow Line Background -->
+            <div
+              class="absolute top-1/2 left-0 w-full h-[2px] pipeline-line hidden lg:block -translate-y-1/2 opacity-20"
+            ></div>
+            <!-- Step 1: Capture -->
+            <div
+              class="z-10 w-full lg:w-72 p-6 glass-panel rounded-xl text-center flex flex-col items-center"
+            >
+              <div
+                class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mb-4 border border-outline"
+              >
+                <span class="material-symbols-outlined text-primary text-3xl"
+                  >sensors</span
+                >
+              </div>
+              <h3 class="font-bold text-on-surface mb-2">Capture</h3>
+              <p class="text-on-surface-variant text-sm font-body-sm">
+                Deep-hooks into SDKs capture all inputs, tool calls, and hidden
+                reasoning chains.
+              </p>
+            </div>
+            <!-- Step 2: Engine -->
+            <div
+              class="z-10 w-full lg:w-72 p-6 glass-panel rounded-xl text-center flex flex-col items-center border-primary/50 shadow-[0_0_30px_rgba(249,115,22,0.1)]"
+            >
+              <div
+                class="w-16 h-16 rounded-full bg-primary flex items-center justify-center mb-4 shadow-[0_0_20px_rgba(249,115,22,0.4)]"
+              >
+                <span class="material-symbols-outlined text-on-primary text-3xl"
+                  >settings_input_component</span
+                >
+              </div>
+              <h3 class="font-bold text-on-surface mb-2">Replay Engine</h3>
+              <p class="text-on-surface-variant text-sm font-body-sm">
+                Virtualizes environmental state to guarantee bit-for-bit
+                identical reproduction.
+              </p>
+            </div>
+            <!-- Step 3: Analysis -->
+            <div
+              class="z-10 w-full lg:w-72 p-6 glass-panel rounded-xl text-center flex flex-col items-center"
+            >
+              <div
+                class="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mb-4 border border-outline"
+              >
+                <span class="material-symbols-outlined text-tertiary text-3xl"
+                  >query_stats</span
+                >
+              </div>
+              <h3 class="font-bold text-on-surface mb-2">Insight</h3>
+              <p class="text-on-surface-variant text-sm font-body-sm">
+                Visualize divergence points between agent versions and
+                regression-test instantly.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- Features Grid -->
+      <section class="py-24">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <!-- Feature 1 -->
+            <div
+              class="p-8 border border-outline-variant bg-surface-container hover:border-primary/40 transition-colors group"
+            >
+              <div class="font-label-caps text-label-caps text-primary mb-4">
+                CAPTURE BEHAVIOR
+              </div>
+              <h4
+                class="font-headline-md text-headline-md text-on-surface mb-4"
+              >
+                Real-time Hooking
+              </h4>
+              <p class="text-on-surface-variant font-body-md">
+                Connect to LangChain, AutoGPT, or custom agents with 2 lines of
+                code. No telemetry overhead.
+              </p>
+              <div
+                class="mt-8 overflow-hidden rounded bg-surface-container-lowest border border-outline-variant"
+              >
+                <div
+                  class="bg-surface-container-highest px-3 py-1 flex justify-between items-center border-b border-outline-variant"
+                >
+                  <span
+                    class="font-code-sm text-code-sm text-on-surface-variant"
+                    >agent.py</span
+                  >
+                  <span class="w-2 h-2 rounded-full bg-error"></span>
+                </div>
+                <pre
+                  class="p-4 font-code-sm text-code-sm text-tertiary"
+                ><code>import replay<br/>agent = replay.init(id="alpha")<br/>agent.capture()</code></pre>
+              </div>
+            </div>
+            <!-- Feature 2 -->
+            <div
+              class="p-8 border border-outline-variant bg-surface-container hover:border-primary/40 transition-colors"
+            >
+              <div class="font-label-caps text-label-caps text-primary mb-4">
+                REPLAY INSTANTLY
+              </div>
+              <h4
+                class="font-headline-md text-headline-md text-on-surface mb-4"
+              >
+                Deterministic Time-Travel
+              </h4>
+              <p class="text-on-surface-variant font-body-md">
+                Step through agent cycles frame-by-frame. Re-run specific tool
+                calls without exhausting LLM tokens.
+              </p>
+              <div class="mt-8 flex gap-2">
+                <div class="h-1 flex-1 bg-primary rounded"></div>
+                <div class="h-1 flex-1 bg-primary rounded"></div>
+                <div class="h-1 flex-1 bg-primary rounded"></div>
+                <div class="h-1 flex-1 bg-outline-variant rounded"></div>
+                <div class="h-1 flex-1 bg-outline-variant rounded"></div>
+              </div>
+              <div class="mt-4 text-xs font-code-sm text-primary">
+                FRAME 003: TOOL_CALL("web_search")
+              </div>
+            </div>
+            <!-- Feature 3 -->
+            <div
+              class="p-8 border border-outline-variant bg-surface-container hover:border-primary/40 transition-colors"
+            >
+              <div class="font-label-caps text-label-caps text-primary mb-4">
+                COMPARE VERSIONS
+              </div>
+              <h4
+                class="font-headline-md text-headline-md text-on-surface mb-4"
+              >
+                Regression Visualizer
+              </h4>
+              <p class="text-on-surface-variant font-body-md">
+                A/B test system prompts. See exactly how logic branches change
+                across different model checkpoints.
+              </p>
+              <div class="mt-8 h-32 flex items-end justify-between gap-1">
+                <div class="w-full bg-outline-variant h-1/2"></div>
+                <div class="w-full bg-primary h-3/4"></div>
+                <div class="w-full bg-outline-variant h-1/3"></div>
+                <div class="w-full bg-primary h-5/6"></div>
+                <div class="w-full bg-outline-variant h-2/3"></div>
+              </div>
+            </div>
+            <!-- Feature 4 (Large / Bento Style) -->
+            <div
+              class="md:col-span-2 p-8 border border-outline-variant bg-surface-container hover:border-primary/40 transition-colors flex flex-col md:flex-row gap-8 items-center"
+            >
+              <div class="flex-1">
+                <div class="font-label-caps text-label-caps text-primary mb-4">
+                  LIVE STREAMING
+                </div>
+                <h4
+                  class="font-headline-md text-headline-md text-on-surface mb-4"
+                >
+                  The Command Center
+                </h4>
+                <p class="text-on-surface-variant font-body-md">
+                  Monitor your fleet in high-fidelity. Low-latency streaming of
+                  inner-monologue and tree-of-thought processing.
+                </p>
+                <ul class="mt-4 space-y-2 text-on-surface-variant font-body-sm">
+                  <li class="flex items-center gap-2">
+                    <span
+                      class="material-symbols-outlined text-primary scale-75"
+                      >check_circle</span
+                    >
+                    0ms Observation Latency
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span
+                      class="material-symbols-outlined text-primary scale-75"
+                      >check_circle</span
+                    >
+                    Multi-agent Synchronization
+                  </li>
+                </ul>
+              </div>
+              <div
+                class="flex-1 w-full bg-surface-container-lowest rounded-lg border border-outline-variant p-4"
+              >
+                <img
+                  class="w-full h-48 object-cover rounded border border-outline-variant"
+                  data-alt="A high-tech control room dashboard visualization with dark interface, neon orange data lines, glowing agent status indicators, complex node graphs showing connectivity, cyber-industrial aesthetic, cinematic low key lighting."
+                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuBgt7lQcbfE6n4EWoQ8iQvFr4EmO_hyek3c51UsK7AEES2xa2TvQbgemVJ5lDkicSKEcR-D7cJ-7Ie2nhubypPnQIZjeCRojCvWrG55xjxIQ-FbnWLhoHIqks3KvwEoC0oP5sv0B4J4HHEzBvOUDDHd16w1Bncouy_T3bY-Zx81GpPWLDX3g8tToiwIuF36F5d1l34mC9b8c4tFqa98TgYTJL4NPzWH7mryHVJReh_UsoTS_HHdiKE"
+                />
+              </div>
+            </div>
+            <!-- Feature 5 -->
+            <div
+              class="p-8 border border-outline-variant bg-surface-container hover:border-primary/40 transition-colors"
+            >
+              <div class="font-label-caps text-label-caps text-primary mb-4">
+                ZERO API COSTS
+              </div>
+              <h4
+                class="font-headline-md text-headline-md text-on-surface mb-4"
+              >
+                Smart Caching
+              </h4>
+              <p class="text-on-surface-variant font-body-md">
+                Replays leverage local caches of LLM responses. Debug failures a
+                thousand times without paying for a single token.
+              </p>
+              <div class="mt-8 flex justify-center">
+                <span class="text-4xl font-bold text-primary">$0.00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- Architecture Diagram Section -->
+      <section class="py-24 bg-surface-container-low overflow-hidden">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            <div>
+              <h2 class="font-display-lg text-display-lg text-on-surface mb-6">
+                Engine Architecture
+              </h2>
+              <p class="text-on-surface-variant mb-8 font-body-md">
+                The Replay Engine sits as a proxy between your agent and the
+                world. It intercepts every interaction, serializing the state in
+                a proprietary binary format designed for speed and storage
+                efficiency.
+              </p>
+              <div class="space-y-6">
+                <div class="flex gap-4 p-4 rounded bg-surface-container">
+                  <div class="text-primary">
+                    <span class="material-symbols-outlined">memory</span>
+                  </div>
+                  <div>
+                    <h5 class="font-bold text-on-surface">The Capture Layer</h5>
+                    <p class="text-on-surface-variant text-sm">
+                      Lightweight hooks into standard networking libraries.
+                    </p>
+                  </div>
+                </div>
+                <div class="flex gap-4 p-4 rounded bg-surface-container">
+                  <div class="text-primary">
+                    <span class="material-symbols-outlined">data_object</span>
+                  </div>
+                  <div>
+                    <h5 class="font-bold text-on-surface">
+                      State Virtualization
+                    </h5>
+                    <p class="text-on-surface-variant text-sm">
+                      Simulates database state and API returns based on trace
+                      data.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              class="relative glass-panel p-8 rounded-2xl min-h-[400px] flex items-center justify-center"
+            >
+              <!-- Abstract Diagram UI -->
+              <div class="w-full space-y-8 relative">
+                <!-- Flow 1 -->
+                <div class="flex items-center gap-4">
+                  <div
+                    class="px-4 py-2 bg-surface-container-highest border border-outline-variant font-code-sm text-xs rounded"
+                  >
+                    AGENT_RUNTIME
+                  </div>
+                  <div class="flex-1 h-[1px] bg-outline-variant relative">
+                    <div
+                      class="absolute inset-0 bg-primary w-0 animate-[grow_2s_ease-in-out_infinite]"
+                      style="animation-name: grow; width: 0%"
+                    ></div>
+                  </div>
+                  <div
+                    class="px-4 py-2 bg-primary-container text-on-primary-container font-code-sm text-xs rounded shadow-lg"
+                  >
+                    REPLAY_ENGINE
+                  </div>
+                </div>
+                <style>
+                  @keyframes grow {
+                    0% {
+                      width: 0;
+                      left: 0;
+                    }
+                    50% {
+                      width: 100%;
+                      left: 0;
+                    }
+                    100% {
+                      width: 0;
+                      left: 100%;
+                    }
+                  }
+                </style>
+                <div
+                  class="ml-12 border-l border-outline-variant pl-8 space-y-8"
+                >
+                  <div class="flex items-center gap-4">
+                    <div
+                      class="w-8 h-8 rounded-full bg-surface-container-highest border border-outline flex items-center justify-center"
+                    >
+                      <span class="material-symbols-outlined text-sm"
+                        >history</span
+                      >
+                    </div>
+                    <div
+                      class="flex-1 bg-surface-container-highest/50 h-8 rounded border border-dashed border-outline-variant flex items-center px-4 font-code-sm text-[10px] text-on-surface-variant"
+                    >
+                      CACHE_MODE: RETURN(prev_resp)
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-4">
+                    <div
+                      class="w-8 h-8 rounded-full bg-surface-container-highest border border-outline flex items-center justify-center"
+                    >
+                      <span
+                        class="material-symbols-outlined text-sm text-primary"
+                        >bolt</span
+                      >
+                    </div>
+                    <div
+                      class="flex-1 bg-primary/10 h-8 rounded border border-primary/30 flex items-center px-4 font-code-sm text-[10px] text-primary"
+                    >
+                      LIVE_MODE: FORWARD(api_target)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- CTA Section -->
+      <section class="py-24 text-center px-6">
+        <div
+          class="max-w-3xl mx-auto p-12 glass-panel rounded-3xl relative overflow-hidden"
+        >
+          <div
+            class="absolute top-0 right-0 w-32 h-32 bg-primary/20 blur-[100px]"
+          ></div>
+          <h2 class="font-display-lg text-display-lg text-on-surface mb-6">
+            Stop Debugging Blindly
+          </h2>
+          <p class="text-on-surface-variant mb-10 font-body-md">
+            Join 5,000+ AI engineers who have achieved 100% test coverage for
+            their autonomous agents.
+          </p>
+          <div class="flex flex-wrap justify-center gap-4">
+            <button
+              class="bg-primary text-on-primary px-8 py-4 rounded-lg font-bold text-lg hover:scale-105 transition-transform"
+            >
+              Start Building For Free
+            </button>
+            <button
+              class="text-on-surface px-8 py-4 rounded-lg font-bold text-lg border border-outline-variant hover:bg-surface-container-highest transition-colors"
+            >
+              Talk To Sales
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <!-- Footer -->
+    <footer
+      class="bg-surface-container-lowest border-t border-outline-variant py-16"
+    >
+      <div class="max-w-7xl mx-auto px-6">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-12">
+          <div class="col-span-2">
+            <span
+              class="font-headline-md text-headline-md text-primary tracking-tight font-extrabold mb-4 block"
+              >Agent Replay</span
+            >
+            <p class="text-on-surface-variant max-w-xs font-body-sm">
+              The infrastructure layer for deterministic AI agent development
+              and testing.
+            </p>
+            <div class="flex gap-4 mt-8">
+              <a
+                class="text-on-surface-variant hover:text-primary transition-colors"
+                href="#"
+                ><span class="material-symbols-outlined">terminal</span></a
+              >
+              <a
+                class="text-on-surface-variant hover:text-primary transition-colors"
+                href="#"
+                ><span class="material-symbols-outlined">database</span></a
+              >
+              <a
+                class="text-on-surface-variant hover:text-primary transition-colors"
+                href="#"
+                ><span class="material-symbols-outlined">cloud</span></a
+              >
+            </div>
+          </div>
+          <div>
+            <h6 class="font-label-caps text-label-caps text-on-surface mb-6">
+              Product
+            </h6>
+            <ul class="space-y-4 text-on-surface-variant font-body-sm">
+              <li><a class="hover:text-primary" href="#">Engine</a></li>
+              <li><a class="hover:text-primary" href="#">Traces</a></li>
+              <li><a class="hover:text-primary" href="#">Evaluations</a></li>
+              <li><a class="hover:text-primary" href="#">Pricing</a></li>
+            </ul>
+          </div>
+          <div>
+            <h6 class="font-label-caps text-label-caps text-on-surface mb-6">
+              Docs
+            </h6>
+            <ul class="space-y-4 text-on-surface-variant font-body-sm">
+              <li><a class="hover:text-primary" href="#">Quickstart</a></li>
+              <li><a class="hover:text-primary" href="#">SDK Reference</a></li>
+              <li><a class="hover:text-primary" href="#">API</a></li>
+              <li><a class="hover:text-primary" href="#">Support</a></li>
+            </ul>
+          </div>
+        </div>
+        <div
+          class="mt-16 pt-8 border-t border-outline-variant flex flex-col md:flex-row justify-between items-center gap-4"
+        >
+          <p class="text-on-surface-variant text-xs">
+            © 2024 Agent Replay Inc. All rights reserved.
+          </p>
+          <div class="flex gap-8 text-xs text-on-surface-variant">
+            <a class="hover:text-primary" href="#">Privacy Policy</a>
+            <a class="hover:text-primary" href="#">Terms of Service</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+    <script>
+      // Micro-interaction for smooth scrolling or hover effects
+      document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+        anchor.addEventListener("click", function (e) {
+          e.preventDefault();
+          document.querySelector(this.getAttribute("href")).scrollIntoView({
+            behavior: "smooth",
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
