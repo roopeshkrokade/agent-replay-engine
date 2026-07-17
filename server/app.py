@@ -17,8 +17,6 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from storage.db import SQLiteGraphStore  # noqa: E402
-from compiler import PlanCompiler, ReplaySession  # noqa: E402
-from runtime import ReplayVM  # noqa: E402
 
 # 🌟 UPDATED IMPORTS: Pointing to your newly renamed files!
 from run_live_crewai import run_multi_agent_workflow  # noqa: E402
@@ -106,31 +104,33 @@ def delete_run(record_id: str):
 # ---------------------------------------------------------
 # 🌟 THE REPLAY ENDPOINT (NOW WITH AUTOGEN ROUTING) 🌟
 # ---------------------------------------------------------
-@app.post("/api/runs/{record_id}/replay", summary="Trigger Engine Replay")
+@app.post("/api/runs/{record_id}/replay", summary="Trigger Engine Replay (Relaxed Mode)")
 def replay_agent_run(record_id: str):
+    """
+    Dynamically loads the graph and forces playback of the sequence
+    regardless of prompt payload differences (Always Relaxed).
+    """
     try:
         loaded_graph = store.load(record_id)
         
-        plan = PlanCompiler().compile(loaded_graph, ReplaySession(mode="CACHE"))
-        vm = ReplayVM(plan)
-        
-        def extract_messages(*args, **kwargs):
-            messages = kwargs.get("messages", [])
-            content = messages[-1]["content"] if messages else ""
-            return {"prompt_snippet": content[-500:]}
+        # 🌟 MATCHING CLI: Bypass ReplayVM and use raw nodes for relaxed sequence playback
+        step_counter = {"current": 0}
+        nodes_list = list(loaded_graph.nodes.values())
 
         def hydrated_interceptor(*args, **kwargs):
-            vm_input = extract_messages(*args, **kwargs)
-            result = vm.advance(vm_input)
-            if not result.success:
-                raise RuntimeError(f"Replay Divergence: {result.resolution.reason}")
-                
             from litellm import ModelResponse
-            return ModelResponse(**result.output)
+            
+            # RELAXED MODE: Ignore prompt differences, force sequence
+            if step_counter["current"] < len(nodes_list):
+                current_node = nodes_list[step_counter["current"]]
+                step_counter["current"] += 1
+                return ModelResponse(**current_node.output)
+            else:
+                raise RuntimeError("Replay Divergence: Agent requested more LLM calls than were recorded in this trace.")
 
         original_completion = litellm.completion
-        
         output_buffer = io.StringIO()
+        
         try:
             litellm.completion = hydrated_interceptor
             
@@ -138,7 +138,7 @@ def replay_agent_run(record_id: str):
             if not hf_token:
                 raise RuntimeError("HF_TOKEN missing from environment.")
             
-            # 🌟 ROUTER: Boot the correct framework based on the agent ID
+            # ROUTER: Boot the correct framework based on the agent ID
             with redirect_stdout(output_buffer):
                 if "autogen" in record_id:
                     run_autogen_workflow(hf_token)
@@ -148,17 +148,21 @@ def replay_agent_run(record_id: str):
                 
             logs = output_buffer.getvalue()
             
+            # SAFELY increment the Replay ROI Counter in the DB
+            if hasattr(store, "increment_replay_count"):
+                store.increment_replay_count(record_id)
+            
             return {
                 "status": "success",
-                "message": f"Successfully replayed {record_id} with ZERO network calls!",
+                "message": f"Successfully replayed {record_id} with ZERO network calls! (Relaxed Mode)",
                 "logs": logs
             }
             
         except Exception as inner_e:
             raise inner_e
         finally:
+            # VERY IMPORTANT: Restore normal network capabilities for the server
             litellm.completion = original_completion
-            output_buffer.close()
             
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

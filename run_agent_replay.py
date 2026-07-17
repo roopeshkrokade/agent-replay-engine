@@ -2,8 +2,6 @@ import litellm
 import argparse
 from crewai import LLM
 from storage import SQLiteGraphStore
-from compiler import PlanCompiler, ReplaySession
-from runtime import ReplayVM
 from env_utils import get_hf_token
 
 # 🌟 IMPORT BOTH APPS
@@ -43,7 +41,7 @@ def run_replay(record_id: str = None):
             except ValueError:
                 print("❌ Enter a valid number.")
 
-    print(f"\n🚀 Booting Replay VM for {record_id}...")
+    print(f"\n🚀 Booting Replay VM for {record_id} in ALWAYS-RELAXED mode...")
     
     try:
         loaded_graph = store.load(record_id)
@@ -51,30 +49,30 @@ def run_replay(record_id: str = None):
         print(f"❌ Error: {e}")
         return
         
-    plan = PlanCompiler().compile(loaded_graph, ReplaySession(mode="CACHE"))
-    vm = ReplayVM(plan)
+
+    step_counter = {"current": 0}
+    nodes_list = list(loaded_graph.nodes.values())
 
     def hydrated_interceptor(*args, **kwargs):
-        messages = kwargs.get("messages", [])
-        prompt_snippet = {"prompt_snippet": messages[-1]["content"][-500:] if messages else ""}
-        result = vm.advance(prompt_snippet)
-        
-        if not result.success:
-            raise RuntimeError(f"Replay Divergence: {result.resolution.reason}")
-            
-        print(f"  ✨ [Replay Engine] Instant replay for node '{result.resolution.node_id}'")
         from litellm import ModelResponse
-        return ModelResponse(**result.output)
+        
+        # 🌟 ALWAYS-RELAXED LOGIC: Ignore prompt differences, force sequence
+        if step_counter["current"] < len(nodes_list):
+            current_node = nodes_list[step_counter["current"]]
+            step_counter["current"] += 1
+            print(f"  ✨ [Relaxed Mode] Forcing cached response for step {step_counter['current']}")
+            return ModelResponse(**current_node.output)
+        else:
+            raise RuntimeError("Replay Divergence: Agent requested more LLM calls than were recorded in this trace!")
 
     litellm.completion = hydrated_interceptor
     hf_token = get_hf_token()
 
-    # 🌟 ROUTER: Boot the correct framework based on the agent ID!
     if "autogen" in record_id:
         run_autogen_workflow(hf_token)
     else:
         hf_llm = LLM(model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct", api_key=hf_token)
-        run_multi_agent_workflow(hf_llm)
+        run_multi_agent_workflow(hf_llm)      
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Universal Replay Engine.")
