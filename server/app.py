@@ -106,27 +106,28 @@ def delete_run(record_id: str):
 # ---------------------------------------------------------
 @app.post("/api/runs/{record_id}/replay", summary="Trigger Engine Replay (Relaxed Mode)")
 def replay_agent_run(record_id: str):
-    """
-    Dynamically loads the graph and forces playback of the sequence
-    regardless of prompt payload differences (Always Relaxed).
-    """
     try:
         loaded_graph = store.load(record_id)
         
-        # 🌟 MATCHING CLI: Bypass ReplayVM and use raw nodes for relaxed sequence playback
         step_counter = {"current": 0}
         nodes_list = list(loaded_graph.nodes.values())
 
         def hydrated_interceptor(*args, **kwargs):
             from litellm import ModelResponse
             
-            # RELAXED MODE: Ignore prompt differences, force sequence
+            # 🔥 CHAOS MONKEY INJECTION 🔥
+            # Let the first network call succeed, but crash the second one (midway through)
+            if step_counter["current"] == 1:
+                step_counter["current"] += 1 # Increment so we don't get stuck
+                raise ConnectionError("🔥 CHAOS MONKEY: Simulated LLM Network Timeout! OpenAI API is down!")
+            
+            # NORMAL RELAXED LOGIC
             if step_counter["current"] < len(nodes_list):
                 current_node = nodes_list[step_counter["current"]]
                 step_counter["current"] += 1
                 return ModelResponse(**current_node.output)
             else:
-                raise RuntimeError("Replay Divergence: Agent requested more LLM calls than were recorded in this trace.")
+                raise RuntimeError("Replay Divergence: Agent requested more LLM calls than were recorded.")
 
         original_completion = litellm.completion
         output_buffer = io.StringIO()
@@ -138,7 +139,6 @@ def replay_agent_run(record_id: str):
             if not hf_token:
                 raise RuntimeError("HF_TOKEN missing from environment.")
             
-            # ROUTER: Boot the correct framework based on the agent ID
             with redirect_stdout(output_buffer):
                 if "autogen" in record_id:
                     run_autogen_workflow(hf_token)
@@ -148,7 +148,6 @@ def replay_agent_run(record_id: str):
                 
             logs = output_buffer.getvalue()
             
-            # SAFELY increment the Replay ROI Counter in the DB
             if hasattr(store, "increment_replay_count"):
                 store.increment_replay_count(record_id)
             
@@ -159,17 +158,22 @@ def replay_agent_run(record_id: str):
             }
             
         except Exception as inner_e:
-            raise inner_e
+            # 🌟 CAPTURE THE CRASH FOR THE UI 🌟
+            # Instead of a 500 error, grab the logs written up to the crash point
+            logs = output_buffer.getvalue()
+            logs += f"\n\n❌ CRITICAL SYSTEM HALT: {str(inner_e)}"
+            
+            # Return HTTP 200 so the frontend Replay Panel can successfully render the red text
+            return {
+                "status": "error",
+                "message": "Replay failed midway due to simulated error.",
+                "logs": logs
+            }
         finally:
-            # VERY IMPORTANT: Restore normal network capabilities for the server
             litellm.completion = original_completion
             
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------------------------------------------------
 # 4. SYSTEM APIs

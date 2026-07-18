@@ -29,7 +29,7 @@ def run_replay(record_id: str = None):
             
         while True:
             choice = input("\n👉 Enter the number of the execution to replay (or 'q' to quit): ").strip()
-            if choice.lower() == 'q':
+            if choice.lower() == "q":
                 return
             try:
                 selected_idx = int(choice) - 1
@@ -49,13 +49,20 @@ def run_replay(record_id: str = None):
         print(f"❌ Error: {e}")
         return
         
-
     step_counter = {"current": 0}
     nodes_list = list(loaded_graph.nodes.values())
 
     def hydrated_interceptor(*args, **kwargs):
         from litellm import ModelResponse
         
+        # 🔥 CHAOS MONKEY INJECTION 🔥
+        # Let the first network call succeed, but crash the second one
+        if step_counter["current"] == 1:
+            step_counter["current"] += 1  # Increment so we don't get stuck
+            raise ConnectionError(
+                "🔥 CHAOS MONKEY: Simulated LLM Network Timeout! OpenAI API is down!"
+            )
+            
         # 🌟 ALWAYS-RELAXED LOGIC: Ignore prompt differences, force sequence
         if step_counter["current"] < len(nodes_list):
             current_node = nodes_list[step_counter["current"]]
@@ -68,11 +75,21 @@ def run_replay(record_id: str = None):
     litellm.completion = hydrated_interceptor
     hf_token = get_hf_token()
 
-    if "autogen" in record_id:
-        run_autogen_workflow(hf_token)
-    else:
-        hf_llm = LLM(model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct", api_key=hf_token)
-        run_multi_agent_workflow(hf_llm)      
+    # 🌟 GRACEFUL ERROR HANDLING FOR THE CLI 🌟
+    try:
+        if "autogen" in record_id:
+            run_autogen_workflow(hf_token)
+        else:
+            hf_llm = LLM(model="huggingface/Qwen/Qwen2.5-Coder-7B-Instruct", api_key=hf_token)
+            run_multi_agent_workflow(hf_llm)
+            
+        # If we remove the Chaos Monkey later, it will reach here:
+        if hasattr(store, "increment_replay_count"):
+            store.increment_replay_count(record_id)
+            
+    except Exception as e:
+        print(f"\n❌ CRITICAL SYSTEM HALT: {str(e)}")
+        print("🛑 Replay terminated prematurely due to simulated error.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Universal Replay Engine.")
