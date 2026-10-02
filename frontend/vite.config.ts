@@ -8,7 +8,8 @@ export default defineConfig(async () => {
   return {
     plugins: [react(), tailwind()],
     build: {
-      outDir: "dist",
+      // Bundled into the Python package and served by `agent-replay serve` at :5000 (MLflow-style)
+      outDir: "../agent_replay/server/ui",
       emptyOutDir: true,
     },
     // Proxy API requests during development to the backend server

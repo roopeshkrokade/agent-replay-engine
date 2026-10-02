@@ -16,8 +16,10 @@ import {
 import {
   fetchAgentVersions,
   replayRecord,
-  replayRecordWithInput,
+  type MatchMode,
+  type ReplayResult,
 } from "../services/api.services";
+import ReplayReport from "../components/workspace/ReplayReport";
 
 import { AnsiUp } from "ansi_up";
 import DOMPurify from "dompurify";
@@ -136,12 +138,11 @@ export default function AgentWorkspace() {
   const [replayingRecordId, setReplayingRecordId] = useState<string | null>(
     null,
   );
-  const [replayResult, setReplayResult] = useState<any | null>(null);
+  const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
   const [replayError, setReplayError] = useState<string | null>(null);
-  const [divergenceExpectedInput, setDivergenceExpectedInput] = useState<
-    any | null
-  >(null);
-  const [failedRecordId, setFailedRecordId] = useState<string | null>(null);
+  const [matchMode, setMatchMode] = useState<MatchMode>("RELAXED");
+  const [faultStep, setFaultStep] = useState<string>("");
+  const [faultPersistent, setFaultPersistent] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>(mockLogs);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -307,6 +308,34 @@ export default function AgentWorkspace() {
     }
   };
 
+  const runReplay = async (recordId: string) => {
+    setReplayResult(null);
+    setReplayError(null);
+    setLogs([]); // clear previous logs for a fresh replay stream
+    setReplayingRecordId(recordId);
+    const step = parseInt(faultStep, 10);
+    const faults =
+      Number.isFinite(step) && step > 0
+        ? [{ step, status: faultPersistent ? 500 : 503, persistent: faultPersistent }]
+        : [];
+    let res: ReplayResult;
+    try {
+      res = await replayRecord(recordId, { match: matchMode, faults });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      setReplayError(msg);
+      addLog("ERROR", parseApiError(msg).summary);
+      return;
+    } finally {
+      // The replay is over once the response arrives; the log animation below is presentation only.
+      setReplayingRecordId(null);
+    }
+    setReplayResult(res);
+    await streamLogs(res.status === "success" ? "SYSTEM" : "ERROR", res.logs || res.message);
+  };
+
+  const selectedRecordId = versions.find((v) => v.selected)?.recordId ?? versions.find((v) => v.recordId)?.recordId;
+
   const agentName = agentId
     ? decodeURIComponent(agentId)
     : "Customer Support Bot";
@@ -425,6 +454,9 @@ export default function AgentWorkspace() {
                 versions.map((version) => (
                   <div
                     key={version.name}
+                    onClick={() =>
+                      setVersions((vs) => vs.map((v) => ({ ...v, selected: v.name === version.name })))
+                    }
                     className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-mono border-l-2 ${
                       version.selected
                         ? "bg-slate-800 border-amber-500"
@@ -438,123 +470,12 @@ export default function AgentWorkspace() {
                     <div className="flex items-center gap-2">
                       {version.recordId ? (
                         <button
-                          onClick={async (e) => {
+                          onClick={(e) => {
                             e.stopPropagation();
-                            setReplayResult(null);
-                            setReplayError(null);
-                            setFailedRecordId(null);
-                            setLogs([]); // clear previous logs for a fresh replay stream
-                            setReplayingRecordId(version.recordId);
-                            try {
-                              const res = await replayRecord(version.recordId);
-                              setReplayResult(res);
-                              // append logs to main viewer
-                              try {
-                                await streamLogs(
-                                  "SYSTEM",
-                                  res.logs ||
-                                    res.message ||
-                                    JSON.stringify(res),
-                                );
-                              } catch (e) {
-                                // ignore logging errors
-                              }
-                              setFailedRecordId(null);
-                            } catch (err: any) {
-                              const msg = err?.message || String(err);
-                              setReplayError(msg);
-                              // append a concise, parsed error to logs
-                              try {
-                                const parsed = parseApiError(msg);
-                                if (parsed.expected) {
-                                  addLog(
-                                    "EVENT",
-                                    "Expected: " + (parsed.expected ?? ""),
-                                  );
-                                  if (parsed.got)
-                                    addLog(
-                                      "MODEL",
-                                      "Got: " + (parsed.got ?? ""),
-                                    );
-                                } else {
-                                  addLog("ERROR", parsed.summary);
-                                }
-                              } catch (e) {
-                                // ignore
-                              }
-                              // Detect API JSON body with detail — be tolerant to multi-line and Python-style dicts
-                              try {
-                                // Try to find JSON object in the error message (slice from first '{')
-                                const firstBrace = msg.indexOf("{");
-                                const jsonPart =
-                                  firstBrace >= 0 ? msg.slice(firstBrace) : msg;
-                                let body: any = null;
-                                try {
-                                  body = JSON.parse(jsonPart);
-                                } catch (e) {
-                                  // ignore
-                                }
-
-                                const detailText =
-                                  body?.detail &&
-                                  typeof body.detail === "string"
-                                    ? body.detail
-                                    : msg;
-
-                                // Flexible parse helper for Python-style dicts or single-quoted JSON
-                                const tryParseFlexible = (s: string) => {
-                                  try {
-                                    return JSON.parse(s);
-                                  } catch (e) {
-                                    try {
-                                      // convert single quotes to double quotes, None/True/False -> null/true/false
-                                      let t = s
-                                        .replace(/None/g, "null")
-                                        .replace(/True/g, "true")
-                                        .replace(/False/g, "false");
-                                      t = t.replace(/'/g, '"');
-                                      return JSON.parse(t);
-                                    } catch (e2) {
-                                      return null;
-                                    }
-                                  }
-                                };
-
-                                // Try to extract Expected {...} (allow multiline with [\s\S])
-                                const m = String(detailText).match(
-                                  /Expected\s+([\s\S]*?)\s*,\s*got/,
-                                );
-                                if (m && m[1]) {
-                                  const parsed = tryParseFlexible(m[1]);
-                                  if (parsed) {
-                                    setDivergenceExpectedInput(parsed);
-                                    setFailedRecordId(version.recordId);
-                                  }
-                                } else {
-                                  // fallback: try to parse detailText as JSON and look for .detail.expected
-                                  try {
-                                    const parsedBody =
-                                      typeof detailText === "string"
-                                        ? tryParseFlexible(detailText)
-                                        : detailText;
-                                    if (parsedBody && parsedBody.expected) {
-                                      setDivergenceExpectedInput(
-                                        parsedBody.expected,
-                                      );
-                                      setFailedRecordId(version.recordId);
-                                    }
-                                  } catch (e) {
-                                    // ignore
-                                  }
-                                }
-                              } catch (e) {
-                                // ignore non-json
-                              }
-                            } finally {
-                              setReplayingRecordId(null);
-                            }
+                            runReplay(version.recordId);
                           }}
-                          className="px-2 py-1 text-xs bg-amber-600 text-slate-900 rounded"
+                          disabled={replayingRecordId !== null}
+                          className="px-2 py-1 text-xs bg-amber-600 text-slate-900 rounded disabled:opacity-50"
                         >
                           {replayingRecordId === version.recordId
                             ? "Replaying..."
@@ -569,92 +490,6 @@ export default function AgentWorkspace() {
                 ))
               )}
             </div>
-            {/* Replay result panel */}
-            {replayResult || replayError || divergenceExpectedInput ? (
-              <div className="mt-3 px-3">
-                {replayError ? (
-                  <div className="text-sm text-red-400">
-                    {parseApiError(replayError).summary}
-                  </div>
-                ) : null}
-
-                {divergenceExpectedInput ? (
-                  <div className="mt-2 text-sm text-slate-300">
-                    <div className="font-semibold text-slate-200">
-                      Replay Divergence Detected
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      Expected input found in record:
-                    </div>
-                    <pre className="mt-2 max-h-40 overflow-auto text-xs whitespace-pre-wrap bg-slate-800 p-2 rounded text-slate-200 font-mono">
-                      {JSON.stringify(divergenceExpectedInput, null, 2)}
-                    </pre>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        onClick={async () => {
-                          if (!divergenceExpectedInput) return;
-                          // Use the expected input to retry replay
-                          setReplayError(null);
-                          setReplayResult(null);
-                          setLogs([]); // clear logs before retrying replay with expected input
-                          const recordId =
-                            failedRecordId ||
-                            versions.find((v) => v.recordId)?.recordId;
-                          if (!recordId) return;
-                          setReplayingRecordId(recordId);
-                          try {
-                            const res = await replayRecordWithInput(
-                              recordId,
-                              divergenceExpectedInput,
-                            );
-                            setReplayResult(res);
-                            // append logs (streamed)
-                            try {
-                              await streamLogs(
-                                "SYSTEM",
-                                res.logs || res.message || JSON.stringify(res),
-                              );
-                            } catch (e) {}
-                            setDivergenceExpectedInput(null);
-                            setFailedRecordId(null);
-                          } catch (err: any) {
-                            const msg = err?.message || String(err);
-                            setReplayError(msg);
-                            // append parsed summary + expected to logs
-                            try {
-                              const parsed = parseApiError(msg);
-                              if (parsed.expected) {
-                                addLog(
-                                  "EVENT",
-                                  "Expected: " + (parsed.expected ?? ""),
-                                );
-                                if (parsed.got)
-                                  addLog("MODEL", "Got: " + (parsed.got ?? ""));
-                              } else {
-                                addLog("ERROR", parsed.summary);
-                              }
-                            } catch (e) {}
-                          } finally {
-                            setReplayingRecordId(null);
-                          }
-                        }}
-                        className="px-3 py-1 bg-amber-600 text-slate-900 rounded text-xs"
-                      >
-                        Replay With Expected Input
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {replayResult ? (
-                  <div className="text-sm text-slate-300">
-                    <div className="font-semibold text-slate-200">
-                      {replayResult?.message || "Replay result"}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
           <div className="border-t border-slate-800 p-4">
@@ -669,8 +504,13 @@ export default function AgentWorkspace() {
           {/* Workspace Toolbar */}
           <div className="border-b border-slate-800 px-3 sm:px-4 py-3 flex flex-wrap items-center gap-y-2 gap-x-3 justify-between">
             <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-              <button className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs sm:text-sm transition-colors whitespace-nowrap">
-                <Play className="w-3.5 h-3.5 fill-current" /> Replay
+              <button
+                onClick={() => selectedRecordId && runReplay(selectedRecordId)}
+                disabled={!selectedRecordId || replayingRecordId !== null}
+                title={selectedRecordId ? `Replay ${selectedRecordId}` : "Select a version to replay"}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:hover:bg-amber-500 text-slate-950 font-bold rounded-lg text-xs sm:text-sm transition-colors whitespace-nowrap"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" /> {replayingRecordId ? "Replaying..." : "Replay"}
               </button>
               <button className="p-2 text-slate-500 hover:text-slate-200 transition-colors">
                 <Square className="w-4 h-4" />
@@ -687,20 +527,69 @@ export default function AgentWorkspace() {
               </button>
             </div>
             <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-              <div className="flex bg-slate-950 border border-slate-700 rounded-lg gap-1 p-1">
-                <button className="px-2.5 sm:px-3 py-1 bg-amber-500 text-slate-950 font-bold text-xs rounded-md transition-colors">
-                  Live
-                </button>
-                <button className="px-2.5 sm:px-3 py-1 text-slate-400 text-xs hover:text-slate-200 transition-colors">
-                  Cache
-                </button>
+              <div
+                className="flex bg-slate-950 border border-slate-700 rounded-lg gap-1 p-1"
+                role="group"
+                aria-label="Request matching"
+              >
+                {(["RELAXED", "STRICT"] as MatchMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setMatchMode(mode)}
+                    aria-pressed={matchMode === mode}
+                    title={
+                      mode === "RELAXED"
+                        ? "Serve the matching (else next) recorded call; report differences"
+                        : "Fail if a request differs from the recording"
+                    }
+                    className={`px-2.5 sm:px-3 py-1 text-xs rounded-md transition-colors ${
+                      matchMode === mode
+                        ? "bg-amber-500 text-slate-950 font-bold"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {mode === "RELAXED" ? "Relaxed" : "Strict"}
+                  </button>
+                ))}
               </div>
+              <label
+                className="flex items-center gap-2 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-400"
+                title="Inject a provider failure on this model call (1-based)"
+              >
+                Fault @
+                <input
+                  type="number"
+                  min={1}
+                  value={faultStep}
+                  onChange={(e) => setFaultStep(e.target.value)}
+                  placeholder="—"
+                  aria-label="Fault on call number"
+                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 font-mono text-slate-200"
+                />
+                <select
+                  value={faultPersistent ? "always" : "once"}
+                  onChange={(e) => setFaultPersistent(e.target.value === "always")}
+                  aria-label="Fault mode"
+                  className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-slate-200"
+                >
+                  <option value="once">once (503)</option>
+                  <option value="always">always (500)</option>
+                </select>
+              </label>
               <div className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono">
                 <CreditCard className="w-3.5 h-3.5 text-slate-500" />
                 <span className="text-slate-300">$0.00</span>
               </div>
             </div>
           </div>
+
+          {replayResult ? (
+            <ReplayReport result={replayResult} onClose={() => setReplayResult(null)} />
+          ) : replayError ? (
+            <div className="border-b border-red-900 bg-red-950/30 px-3 sm:px-4 py-3 text-sm text-red-300">
+              {parseApiError(replayError).summary}
+            </div>
+          ) : null}
 
           {/* Log Viewer */}
           <div

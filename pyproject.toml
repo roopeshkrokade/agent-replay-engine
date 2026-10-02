@@ -1,18 +1,56 @@
 [project]
 name = "agent-replay-engine"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Record any agent framework through OpenTelemetry and replay it deterministically."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "ag2>=0.14.0",
-    "crewai>=1.15.2",
     "fastapi>=0.139.2",
-    "litellm<1.92.0",
+    "uvicorn>=0.51.0",
     "sqlalchemy>=2.0.51",
+    "opentelemetry-sdk>=1.42",
+    "opentelemetry-exporter-otlp-proto-http>=1.42",
+    "opentelemetry-proto>=1.42",
+]
+
+[project.scripts]
+agent-replay = "agent_replay.cli.main:main"
+
+[project.optional-dependencies]
+# Example agents only. The engine itself never imports a framework or LiteLLM;
+# installing a framework's OTel instrumentor is all autolog() needs.
+crewai = [
+    "crewai>=1.15.2",
+    "openinference-instrumentation-crewai>=1.1.19",
+    "openinference-instrumentation-openai>=0.1",
+]
+anthropic = [
+    "anthropic>=0.40",
+    "openinference-instrumentation-anthropic>=0.1",
+]
+autogen = [
+    "ag2[openai]>=0.14.0",
+    "openinference-instrumentation-ag2>=0.1.10",
+    "openinference-instrumentation-openai>=0.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "openai>=2.30.0",
+    "httpx>=0.28.1",
+    "anthropic>=0.40",
+    "openinference-instrumentation-anthropic>=0.1",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_replay"]
+# The React build is gitignored; ship it in the wheel anyway (run `npm run build` in frontend/ first).
+artifacts = ["agent_replay/server/ui/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

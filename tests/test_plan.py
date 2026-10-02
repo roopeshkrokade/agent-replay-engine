@@ -1,16 +1,11 @@
-import sys
-from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-    
-from adapters.openinference.adapter import OpenInferenceAdapter  # noqa: E402
-from compiler import IRCompiler, PlanCompiler, ReplaySession  # noqa: E402
+from agent_replay.adapters.openinference.adapter import OpenInferenceAdapter
+from agent_replay.compiler import IRCompiler, PlanCompiler, ReplaySession
+from tests import SAMPLE_TRACE
 
 def test_plan_compilation():
     print("1. [Adapter] Parsing external trace...")
     adapter = OpenInferenceAdapter()
-    events = adapter.parse_file("sample_trace.json")
+    events = adapter.parse_file(SAMPLE_TRACE)
 
     print("2. [IR Compiler] Building ExecutionGraph...")
     ir_compiler = IRCompiler()

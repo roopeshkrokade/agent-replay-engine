@@ -1,14 +1,9 @@
 import json
 import dataclasses
 from enum import Enum
-import sys
-from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-    
-from adapters.openinference.adapter import OpenInferenceAdapter  # noqa: E402
-from compiler.ir_compiler import IRCompiler  # noqa: E402
+from agent_replay.adapters.openinference.adapter import OpenInferenceAdapter
+from agent_replay.compiler.ir_compiler import IRCompiler
+from tests import SAMPLE_TRACE
 
 # JSON Helper to handle Enums cleanly
 class IREncoder(json.JSONEncoder):
@@ -20,7 +15,7 @@ class IREncoder(json.JSONEncoder):
 def test_compiler_pipeline():
     print("1. Parsing external trace via Adapter...")
     adapter = OpenInferenceAdapter()
-    events = adapter.parse_file("sample_trace.json")
+    events = adapter.parse_file(SAMPLE_TRACE)
     print(f"   -> Emitted {len(events)} CanonicalEvents.")
 
     print("\n2. Compiling events into ExecutionGraph (IR)...")

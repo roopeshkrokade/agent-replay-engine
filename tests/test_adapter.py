@@ -1,17 +1,12 @@
-import sys
-from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from adapters.openinference.adapter import OpenInferenceAdapter  # noqa: E402
+from agent_replay.adapters.openinference.adapter import OpenInferenceAdapter
+from tests import SAMPLE_TRACE
 
 def test_adapter_parsing():
     print("1. Initializing OpenInference Adapter...")
     adapter = OpenInferenceAdapter()
     
     print("2. Parsing sample_trace.json into Canonical Events...")
-    events = adapter.parse_file("sample_trace.json")
+    events = adapter.parse_file(SAMPLE_TRACE)
     
     print("\n--- CANONICAL EVENT STREAM ---")
     for event in events:

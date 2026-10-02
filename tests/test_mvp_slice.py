@@ -1,12 +1,7 @@
-import sys
-from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-    
-from adapters.openinference.adapter import OpenInferenceAdapter  # noqa: E402
-from compiler import IRCompiler, PlanCompiler, ReplaySession  # noqa: E402
-from runtime import ReplayVM  # noqa: E402
+from agent_replay.adapters.openinference.adapter import OpenInferenceAdapter
+from agent_replay.compiler import IRCompiler, PlanCompiler, ReplaySession
+from agent_replay.runtime import ReplayVM
+from tests import SAMPLE_TRACE
 
 def test_full_vertical_slice():
     print("==========================================")
@@ -15,7 +10,7 @@ def test_full_vertical_slice():
 
     # 1. INGESTION
     print("[1] Ingesting OpenInference Trace...")
-    events = OpenInferenceAdapter().parse_file("sample_trace.json")
+    events = OpenInferenceAdapter().parse_file(SAMPLE_TRACE)
     
     # 2. IR COMPILATION
     print("[2] Compiling Execution Graph (IR)...")
